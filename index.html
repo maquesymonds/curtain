@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>curtain — tipografía animada</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #000; overflow: hidden; overscroll-behavior: none;
+    font: 400 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+    color: #fff;
+  }
+
+  /* Each piece lives in its own iframe: its own module scope, its own canvas,
+     its own physics loop. Nothing to reconcile between three pieces that were
+     each written as the whole page. */
+  #stage { position: fixed; inset: 0; }
+  iframe {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    border: 0; display: none; opacity: 0;
+    transition: opacity 340ms ease;
+    /* A piece booting out of sight is display:block with opacity 0 — invisible,
+       but it would still sit on top of the piece you ARE looking at and swallow
+       every pointer move, which is the force the letters answer to. */
+    pointer-events: none;
+  }
+  iframe.active { opacity: 1; pointer-events: auto; }
+
+  /* ----- chrome. Deliberately faint: it sits on top of the work. ----- */
+  .ui { position: fixed; z-index: 10; }
+
+  .arrow {
+    top: 50%; transform: translateY(-50%);
+    width: 68px; height: 120px;
+    display: grid; place-items: center;
+    background: none; border: 0; cursor: pointer;
+    color: #fff; opacity: 0.28;
+    transition: opacity 180ms ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .arrow:hover, .arrow:focus-visible { opacity: 0.95; outline: none; }
+  .arrow svg { width: 26px; height: 26px; filter: drop-shadow(0 0 6px rgba(0,0,0,0.9)); }
+  #prev { left: 0; }
+  #next { right: 0; }
+
+  #label {
+    left: 26px; bottom: 22px;
+    display: flex; align-items: baseline; gap: 12px;
+    text-shadow: 0 0 10px rgba(0,0,0,0.95);
+    pointer-events: none;
+  }
+  #num { opacity: 0.4; font-variant-numeric: tabular-nums; }
+  #name { font-size: 15px; letter-spacing: 0.14em; text-transform: uppercase; }
+  #desc { opacity: 0.5; }
+
+  #dots {
+    left: 50%; transform: translateX(-50%); bottom: 24px;
+    display: flex; gap: 10px;
+  }
+  .dot {
+    width: 7px; height: 7px; padding: 0;
+    border-radius: 50%; border: 1px solid rgba(255,255,255,0.5);
+    background: none; cursor: pointer;
+    transition: background 180ms ease, transform 180ms ease;
+  }
+  .dot[aria-current="true"] { background: #fff; transform: scale(1.25); }
+
+  #hint {
+    right: 26px; bottom: 24px; opacity: 0.52;
+    pointer-events: none; text-shadow: 0 0 10px rgba(0,0,0,0.95);
+    transition: opacity 600ms ease;
+  }
+  #hint.gone { opacity: 0; }
+
+  #loading {
+    left: 50%; top: 50%; transform: translate(-50%, -50%);
+    opacity: 0; pointer-events: none; letter-spacing: 0.2em;
+    transition: opacity 200ms ease;
+  }
+  #loading.on { opacity: 0.45; }
+
+  @media (prefers-reduced-motion: reduce) {
+    iframe, #hint, #loading { transition: none; }
+  }
+  @media (max-width: 640px) {
+    .arrow { width: 48px; }
+    #desc { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div id="stage"></div>
+
+<button class="ui arrow" id="prev" aria-label="Pieza anterior">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+       stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+</button>
+<button class="ui arrow" id="next" aria-label="Pieza siguiente">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+       stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+</button>
+
+<div class="ui" id="label">
+  <span id="num"></span><span id="name"></span><span id="desc"></span>
+</div>
+<div class="ui" id="dots"></div>
+<div class="ui" id="hint">← → para pasar · D diagnóstico</div>
+<div class="ui" id="loading">CARGANDO</div>
+
+<script>
+const PIECES = [
+  { slug: "fish",   src: "fish/",   name: "Pez",     desc: "aletas de código · fuerzas de agua" },
+  { slug: "willow", src: "willow/", name: "Sauce",   desc: "lianas que cuelgan de las ramas" },
+  { slug: "horse",  src: "horse/",  name: "Caballo", desc: "crin de letras" },
+];
+
+const stage = document.getElementById("stage");
+const elNum = document.getElementById("num");
+const elName = document.getElementById("name");
+const elDesc = document.getElementById("desc");
+const elDots = document.getElementById("dots");
+const elHint = document.getElementById("hint");
+const elLoading = document.getElementById("loading");
+
+const frames = new Array(PIECES.length).fill(null);
+const ready = new Array(PIECES.length).fill(false); // has posted "curtain:ready"
+let index = -1;
+
+// A piece that has not said "curtain:ready" has no letters yet, so it is NEVER
+// faded in — the previous piece stays on screen instead. Fallback in case a
+// piece dies before it can say anything: after this long we show it anyway,
+// because a stuck shell is worse than a bare background.
+const READY_FALLBACK_MS = 12000;
+
+// Built once per piece and then kept. Returning to a piece finds it exactly as
+// it was left instead of paying for a rebuild — willow alone is 2917 strands and
+// 20211 particles.
+//
+// A booting frame is display:block with opacity 0: invisible, but its rAF runs,
+// which is what lets it build, settle and paint out of sight. It only drops to
+// display:none once it is ready and not the piece on screen.
+function ensureFrame(i) {
+  if (frames[i]) return frames[i];
+  const p = PIECES[i];
+  const f = document.createElement("iframe");
+  f.src = p.src;
+  f.title = p.name;
+  f.setAttribute("scrolling", "no");
+  f.setAttribute("allow", "autoplay");
+  f.dataset.slug = p.slug;
+  f.style.display = "block";
+  f.addEventListener("load", () => {
+    // Same origin (everything is served off one localhost), so the shell can put
+    // its own key handler inside the piece too. Without this, one click on a
+    // piece moves focus into its document and the arrow keys stop working — the
+    // parent never sees them.
+    try {
+      f.contentWindow.addEventListener("keydown", onKey);
+    } catch (err) {
+      console.warn("No pude escuchar teclas dentro de", p.slug, "— usa las flechas de pantalla.", err);
+    }
+    setTimeout(() => {
+      if (!ready[i]) {
+        console.warn(`${p.slug} no dijo "curtain:ready" en ${READY_FALLBACK_MS}ms; la muestro igual.`);
+        markReady(i);
+      }
+    }, READY_FALLBACK_MS);
+  });
+  frames[i] = f;
+  stage.appendChild(f);
+  return f;
+}
+
+const post = (f, type) => {
+  try {
+    f.contentWindow?.postMessage({ type }, "*");
+  } catch (_) {
+    /* the piece may not have booted far enough to listen; harmless */
+  }
+};
+
+function setLoading(on) {
+  elLoading.classList.toggle("on", on);
+}
+
+// One at a time, and only once the piece on screen is up: three simultaneous
+// boots (two videos, ~2900 strands, three JSON fetches) would slow down the one
+// piece the viewer is actually waiting for.
+function preloadNext() {
+  if (!ready[index]) return;
+  const next = frames.findIndex((f) => f === null);
+  if (next >= 0 && frames.every((f, i) => f === null || ready[i])) ensureFrame(next);
+}
+
+function markReady(i) {
+  if (ready[i]) return;
+  ready[i] = true;
+  if (i === index) reveal();
+  else park(i);
+  preloadNext();
+}
+
+// `display:none` only stops the compositing. It does NOT stop the piece: Chrome
+// kept firing rAF 19 times/s inside a hidden iframe (measured 2026-08-12), and
+// one prefetched willow left solving behind another piece cost the visible one
+// 30.7 -> 18.6 fps. "curtain:hide" is what actually parks it — the message is the
+// load-bearing line here, the style change is the cosmetic one.
+function park(i) {
+  const f = frames[i];
+  if (!f || i === index) return;
+  post(f, "curtain:hide");
+  f.classList.remove("active");
+  f.style.display = "none";
+}
+
+// The crossfade only ever starts here, i.e. only once the incoming piece has
+// letters painted. The outgoing piece holds the screen until then.
+function reveal() {
+  const f = frames[index];
+  if (!f || !ready[index]) {
+    setLoading(true);
+    return;
+  }
+  setLoading(false);
+  f.style.display = "block";
+  post(f, "curtain:show");
+  void f.offsetWidth; // commit the display change so the fade actually runs
+  f.classList.add("active");
+
+  frames.forEach((g, j) => {
+    if (j === index || !g || !g.classList.contains("active")) return;
+    g.classList.remove("active");
+    post(g, "curtain:hide");
+    setTimeout(() => {
+      if (index !== j) g.style.display = "none";
+    }, 360);
+  });
+}
+
+function show(i, { push = true } = {}) {
+  if (i === index) return;
+  index = ((i % PIECES.length) + PIECES.length) % PIECES.length;
+  const p = PIECES[index];
+  ensureFrame(index);
+  reveal(); // no-op until the piece says it has letters
+
+  elNum.textContent = String(index + 1).padStart(2, "0");
+  elName.textContent = p.name;
+  elDesc.textContent = p.desc;
+  for (const d of elDots.children) {
+    d.setAttribute("aria-current", String(Number(d.dataset.i) === index));
+  }
+  if (push) history.replaceState(null, "", "#" + p.slug);
+  document.title = `${p.name} — curtain`;
+}
+
+window.addEventListener("message", (e) => {
+  if (e.data?.type !== "curtain:ready") return;
+  const i = frames.findIndex((f) => f && f.contentWindow === e.source);
+  if (i >= 0) markReady(i);
+});
+
+const go = (delta) => show(index + delta);
+
+function onKey(e) {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === "ArrowRight") { go(1); hideHint(); }
+  else if (e.key === "ArrowLeft") { go(-1); hideHint(); }
+  else if (e.key >= "1" && e.key <= String(PIECES.length)) { show(Number(e.key) - 1); hideHint(); }
+  else return;
+  e.preventDefault();
+}
+
+let hintTimer = null;
+function hideHint() {
+  elHint.classList.add("gone");
+  clearTimeout(hintTimer);
+}
+
+PIECES.forEach((p, i) => {
+  const b = document.createElement("button");
+  b.className = "dot";
+  b.dataset.i = i;
+  b.type = "button";
+  b.setAttribute("aria-label", p.name);
+  b.addEventListener("click", () => { show(i); hideHint(); });
+  elDots.appendChild(b);
+});
+
+document.getElementById("prev").addEventListener("click", () => { go(-1); hideHint(); });
+document.getElementById("next").addEventListener("click", () => { go(1); hideHint(); });
+window.addEventListener("keydown", onKey);
+
+// Touch: a horizontal swipe past 50px pages, and only if it is clearly more
+// horizontal than vertical, so a scroll gesture isn't read as a page turn.
+let tx = 0, ty = 0;
+window.addEventListener("touchstart", (e) => {
+  tx = e.touches[0].clientX; ty = e.touches[0].clientY;
+}, { passive: true });
+window.addEventListener("touchend", (e) => {
+  const dx = e.changedTouches[0].clientX - tx;
+  const dy = e.changedTouches[0].clientY - ty;
+  if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.4) { go(dx < 0 ? 1 : -1); hideHint(); }
+}, { passive: true });
+
+window.addEventListener("hashchange", () => {
+  const i = PIECES.findIndex((p) => p.slug === location.hash.slice(1));
+  if (i >= 0) show(i, { push: false });
+});
+
+// Deep link: /#willow opens on the willow.
+const start = PIECES.findIndex((p) => p.slug === location.hash.slice(1));
+show(start >= 0 ? start : 0);
+hintTimer = setTimeout(hideHint, 6000);
+</script>
+</body>
+</html>

@@ -1,0 +1,114 @@
+/* ==========================================================================
+   EDITOR CHROME — button panel + strip along the bottom of the screen.
+   Shared by every piece that has an authoring tool (horse track editor,
+   willow anchor editor). The root carries [hidden] unless the tool is open.
+   ========================================================================== */
+.te-root {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  font: 12px ui-monospace, "SF Mono", Menlo, monospace;
+  color: #cfe;
+  background: rgba(5, 1, 10, 0.82);
+  border-top: 1px solid rgba(0, 255, 120, 0.35);
+}
+
+.te-root[hidden] {
+  display: none;
+}
+
+.te-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.te-panel button {
+  font: inherit;
+  color: #cfe;
+  background: rgba(0, 255, 120, 0.1);
+  border: 1px solid rgba(0, 255, 120, 0.45);
+  border-radius: 3px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.te-panel button:hover {
+  background: rgba(0, 255, 120, 0.22);
+  color: #fff;
+}
+
+.te-panel button:active {
+  background: rgba(0, 255, 120, 0.35);
+}
+
+/* The primary action, so it doesn't read as one more button in the row. */
+.te-panel button.te-save {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #04140a;
+  background: #00ff66;
+  border-color: #00ff66;
+  padding: 4px 14px;
+}
+
+.te-panel button.te-save:hover {
+  background: #6bffa5;
+  color: #04140a;
+}
+
+.te-message {
+  margin-left: auto;
+  padding-left: 10px;
+  color: #8fdcb0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.te-message.is-error {
+  color: #ff6b9d;
+}
+
+/* One cell per frame, so a click maps to an exact frame and keyframe marks sit
+   on precisely the right column. */
+.te-timeline {
+  display: flex;
+  height: 26px;
+  gap: 1px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.te-cell {
+  flex: 1 1 0;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.te-cell:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* a frame carrying a real keyframe */
+.te-cell.is-key {
+  background: #ff2fae;
+}
+
+/* the playhead — outlined so it stays visible on top of a keyframe mark */
+.te-cell.is-current {
+  background: #00ff66;
+  box-shadow: 0 0 0 1px #00ff66;
+}
+
+.te-cell.is-key.is-current {
+  background: #fff34d;
+  box-shadow: 0 0 0 1px #fff34d;
+}

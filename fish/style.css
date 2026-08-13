@@ -1,0 +1,42 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  /* The clip's own darkest water, so any letterboxing at odd aspect ratios reads
+     as more water rather than as a black bar. */
+  background: #031015;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* The clip, filling the viewport with the same cover geometry computeCover()
+   assumes. If these two ever disagree the fin roots drift off the body, so this
+   must stay `cover` / `center`. */
+#bg {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+  z-index: 0;
+}
+
+/* Transparent simulation layer above the footage. */
+#fins {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  pointer-events: none;
+}

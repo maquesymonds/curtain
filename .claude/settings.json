@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -f /tmp/claude-502/-Users-maquesymonds-Desktop-curtain/f81cf38f-be3c-493a-a8dc-c47ee893999a/scratchpad/dbg3.png /tmp/claude-502/-Users-maquesymonds-Desktop-curtain/f81cf38f-be3c-493a-a8dc-c47ee893999a/scratchpad/v5.png)",
+      "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --hide-scrollbars --window-size=1440,900 --virtual-time-budget=2500 --screenshot=/tmp/claude-502/-Users-maquesymonds-Desktop-curtain/f81cf38f-be3c-493a-a8dc-c47ee893999a/scratchpad/dbg3.png http://localhost:8000/horse/?debug=1)",
+      "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --hide-scrollbars --window-size=1440,900 --virtual-time-budget=6000 --screenshot=/tmp/claude-502/-Users-maquesymonds-Desktop-curtain/f81cf38f-be3c-493a-a8dc-c47ee893999a/scratchpad/v5.png http://localhost:8000/horse/)"
+    ]
+  }
+}

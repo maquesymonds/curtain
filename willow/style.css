@@ -1,0 +1,41 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: #0a0716;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* The painting, filling the viewport. Never transformed or animated — the whole
+   idea is that the tree is still and only the letters move. */
+#bg {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+  z-index: 0;
+}
+
+/* Transparent simulation layer above the painting. */
+#fronds {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  /* Not interactive by default. The anchor editor flips this to `auto` in JS for
+     as long as it is open, because it needs clicks and pointer capture. */
+  pointer-events: none;
+}

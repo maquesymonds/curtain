@@ -1,0 +1,50 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: #05010a;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* Fullscreen background layers (video for video mode, img for static mode).
+   Both fill the viewport identically with object-fit:cover so the overlay
+   alignment is the same regardless of mode. Only one is shown at a time. */
+#bg-video,
+#bg-image {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+  z-index: 0;
+}
+
+/* hidden until the active mode enables it */
+#bg-video[hidden],
+#bg-image[hidden] {
+  display: none;
+}
+
+/* Transparent simulation layer above the photo. */
+#mane {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  /* Not interactive by default. The track editor flips this to `auto` in JS for
+     as long as it is open, because it needs pointer events and pointer capture
+     to drag the control points. */
+  pointer-events: none;
+}

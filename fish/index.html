@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pez — Aletas de Código</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- The clip, untouched. A 60-frame / 2.5s loop cut so the fish's pose almost
+       matches at the seam: 30px and 1.82°, against 109px and 4.19° uncut. -->
+  <video id="bg" muted loop playsinline autoplay preload="auto"></video>
+
+  <!-- Transparent layer where the fins are drawn. -->
+  <canvas id="fins"></canvas>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

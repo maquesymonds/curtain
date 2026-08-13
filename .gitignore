@@ -1,0 +1,14 @@
+.DS_Store
+._*
+
+# La primera versión de la pieza (el retrato) y los duplicados que estaban
+# sueltos en la raíz. Movidos aquí en vez de borrados por si hacen falta;
+# se pueden eliminar a mano cuando estés seguro.
+_borrar/
+
+# Carpeta creada por error por algún script — no es del proyecto.
+undefined/
+
+# Los vídeos fuente de fish/ (el sin recortar y el de referencia con aletas) SÍ
+# se versionan a propósito: son el origen de la pieza y el navegador nunca los
+# descarga, sólo se pide fish-loop.mp4. Ocupan en el repo, no en la web.

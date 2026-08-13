@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Neon Mane — Typographic Horse</title>
+  <link rel="stylesheet" href="../shared/css/editor.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Fullscreen background layers (object-fit:cover). One is used per mode. -->
+  <video id="bg-video" muted playsinline loop autoplay preload="auto"></video>
+  <img id="bg-image" alt="" />
+
+  <!-- Transparent simulation layer where the typographic mane is drawn. -->
+  <canvas id="mane"></canvas>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
