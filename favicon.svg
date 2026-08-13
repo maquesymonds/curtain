@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" fill="#04161c"/>
+  <g fill="#ff7a18" font-family="ui-monospace, monospace" font-size="13" font-weight="300"
+     text-anchor="middle" opacity="0.95">
+    <text x="9"  y="13">0</text>
+    <text x="16" y="17">1</text>
+    <text x="23" y="21">{</text>
+    <text x="9"  y="26">/</text>
+  </g>
+</svg>
