@@ -38,6 +38,9 @@ export const CONTROL_SPEC = {
     jitterPhase: { path: "swell.jitterPhase", range: [0, 1.5], apply: "rebuild" },
     // = the trimmed clip (2.5s). Change it and the wave stops closing with the video.
     period: { path: "windPeriod", range: [0.5, 10], apply: "live" },
+    // How many frames early a fin's own tracked beat (pectoral's `flap` in
+    // fins.js) is read — raise if it still looks like it's chasing the video.
+    flapLead: { path: "flapLead", range: [0, 10], step: 1, apply: "live" },
   },
 
   fuerzas: {
@@ -53,12 +56,24 @@ export const CONTROL_SPEC = {
     // Fraction of a ray, from the root, exempt from collision: a fin GROWS out of the
     // body, so its first characters belong on the skin.
     collisionFromDepth: { path: "collisionFromDepth", range: [0, 0.6], apply: "live" },
+    // A steady outward push from the body centre, not just a reaction once a
+    // particle is already inside it — see the header note in hairSystem.js.
+    radialPush: { path: "systems.radialPush", apply: "live" },
+    radialPushAmount: { path: "radialPush", range: [0, 0.03], step: 0.001, apply: "live" },
+    // Absorbs the boomerang turnaround's velocity-reversal shock, right when
+    // it happens, without changing how loose the fins feel the rest of the beat.
+    whipDamperFrames: { path: "whipDamper.frames", range: [0, 20], step: 1, apply: "live" },
+    whipDamperFactor: { path: "whipDamper.factor", range: [0, 1], apply: "live" },
   },
 
   raiz: {
     bendReturn: { path: "bendReturn", range: [0, 0.06], apply: "live" },
     bendReturnCurve: { path: "bendReturnCurve", range: [1, 4], apply: "live" },
     rootStiffness: { path: "rootStiffness", range: [1, 10], step: 1, apply: "live" },
+    // Curvature resistance along the WHOLE strand — the ceiling-raiser for
+    // "more rigid" once rootStiffness (root-only) is already maxed at 10.
+    bendStiffness: { path: "systems.bendStiffness", apply: "live" },
+    bendStiffnessAmount: { path: "bendStiffness", range: [0, 0.6], step: 0.01, apply: "live" },
     cohesion: { path: "cohesion", range: [0, 0.4], apply: "live" },
     cohesionMaxDist: { path: "cohesionMaxDist", range: [6, 80], apply: "rebuild" },
     cohesionClump: { path: "cohesionClump", range: [0, 1], apply: "rebuild" },
@@ -66,6 +81,9 @@ export const CONTROL_SPEC = {
   },
 
   mechon: {
+    // A multiplier over every fin's own authored `spread` (fins.js) at once —
+    // 1 = as authored, above 1 opens every fan wider, below 1 narrows them.
+    finSpreadScale: { path: "finSpreadScale", range: [0.5, 2], step: 0.05, apply: "rebuild" },
     segmentLength: { path: "segmentLength", range: [6, 24], apply: "rebuild" },
     curveBias: { path: "curveBias", range: [0, 0.6], apply: "rebuild" },
     maxArcPx: { path: "maxArcPx", range: [20, 300], apply: "rebuild" },

@@ -54,6 +54,48 @@ rojo saturado sobre casi negro, así que la pose sale de una máscara de color.
 Recorrido entre frames 4.87 px de media, 8.48 px el peor, 0.16°/frame — suave sin
 suavizar. No hay editor de tracking y no hace falta.
 
+**Loop boomerang.** Los 30 px / 1.82° de arriba eran el MEJOR corte posible
+reproduciendo siempre hacia adelante — cualquier recorte deja algo de salto
+porque la pose de cierre nunca es exactamente la de apertura. `fish-loop-
+boomerang.mp4` lo elimina en vez de minimizarlo: es `fish-loop.mp4` (60 frames)
+reproducido hacia adelante y luego invertido, pegado (120 frames, 5.0 s exactos
+— sí repite un frame en cada costura, ~42ms, y eso es preferible: la
+alternativa de recortar esos dos frames para evitarlo fue lo que rompió la
+correspondencia de tiempo, ver abajo). El navegador lo decodifica siempre
+hacia adelante (nativo, sin *seeking* manual por JS en cada frame).
+
+`fish-tracking.json` **no se duplicó** para acompañarlo — sigue midiendo el
+mismo paso único de 60 frames / 2.5 s. `boomerangTime()` en `bodyTrack.js`
+pliega el tiempo crudo del archivo (que ahora dura el doble) de vuelta a ese
+dominio de 60 frames — así que "frame 34" es la misma pose medida (y corregida
+a mano si le tocó corrección) tanto a la ida como en su espejo de vuelta.
+Consecuencia: **ninguna corrección hecha con `?track` o el modo `frame` de
+`?anchors` hay que rehacerla** — están indexadas por ese mismo número de
+frame, no por tiempo de archivo. Por la misma razón `swell.windPeriod`
+tampoco se retocó: una onda periódica reproducida hacia atrás sobre
+exactamente un período sigue siendo continua.
+
+**Bug de la primera versión, y por qué no era un triángulo simple.** El primer
+intento usaba `logical = 2×loopDuration − rawTime` para el pase reverso —
+parece razonable, y estaba mal en **un frame completo, sostenido durante TODO
+el pase reverso**, no solo en la costura: el frame `n` (primer frame del medio
+invertido) no existe, el último es `n-1`. El punto de espejo correcto es
+`(2n-1)/fps`, no `2n/fps`. Verificado por SSIM (no por checksum — la
+recompresión con pérdida cambia bytes aunque el contenido sea idéntico, así
+que MD5 entre el archivo fuente y el generado no sirve de verificación): el
+frame 90 del archivo boomerang da SSIM 0.975 contra el frame 29 original y
+0.922 contra el 30 — la fórmula vieja predecía 30. Esa desalineación sostenida
+es lo que hacía que las raíces de las aletas se movieran con un cuerpo
+trackeado que no correspondía al frame real durante medio loop, y la física
+reaccionaba a ese desfase constante metiendo energía en la cadena de
+partículas — se leía como que las aletas colapsaban hacia adentro.
+
+Segundo bug, independiente del primero: `BodyTrack.frameAt`/`poseAt` hacían
+wrap (`% n`) en vez de clamp. Con el tiempo ya plegado por `boomerangTime`,
+tocar exactamente `loopDuration` (pasa una vez por ciclo, en el pico) hacía
+`60 % 60 = 0` — mezclaba el último frame hacia el primero en vez de sostenerse
+en el último. Ahora `frameAt` sostiene (clamp) en vez de envolver.
+
 ## Verificado en el navegador, no a ojo
 
 - **Legibilidad.** Detalle de alta frecuencia en la zona de la caudal: 10.07 con
@@ -97,6 +139,70 @@ referencia y no razonando a priori:
    porque es la *inserción* de la aleta y le toca estar sobre la piel. Sin eso el
    colisionador echaba la base de la caudal fuera del pedúnculo y reabría justo el
    hueco que las raíces nuevas venían a cerrar.
+
+## Editor de anclas de aleta (`?anchors`, o la tecla `e`)
+
+Los puntos de `arc` en `fins.js` — dónde nace el abanico de cada aleta, en
+coordenadas de cuerpo `(u, v)` — se pueden arrastrar en vivo, sobre el vídeo,
+en vez de editarse a mano en el código. `finAnchorEditor.js` dibuja cada punto
+en su posición real de pantalla para el frame que está corriendo y, al
+soltarlo, `finAnchorStore.js` lo convierte de vuelta a `(u, v)` con la pose de
+ese instante (`bodyTrack.normToLocal`) y lo escribe en `FINS` — mismo array
+que lee `buildFinRoots`, así que el cambio se ve al próximo rebuild (la tecla
+`e` cierra el editor, que autoguarda en `localStorage` y también exporta a
+`fish-fin-anchors.json` para comprometerlo).
+
+Es la forma de sacarlos de fase con el cuerpo: si al ver `?diag` los roots no
+caen sobre la silueta del pez, es porque el `arc` de esa aleta está puesto a
+ojo y desactualizado — se arrastra ahí, no se adivina un número nuevo en el
+código.
+
+No confundir con lo que ya dibuja `?diag`: eso muestra los ~82 roots
+construidos (uno por rayo, ya repartidos e interpolados sobre el arco); el
+editor muestra solo los 2 a 5 puntos de control del `arc` de cada aleta, que
+es lo que de verdad se autoriza a mano.
+
+## Editor de corrección de tracking (`?track`, o la tecla `r`)
+
+Distinto del editor de anclas de arriba, y para un problema distinto: no es
+que un `arc` esté mal puesto (eso es constante, viaja con el cuerpo en todos
+los frames por igual), es que el tracking generado en `fish-tracking.json` se
+resbala en frames puntuales — el `arc` está bien pero la elipse del cuerpo que
+lo carga, en ESE frame, no.
+
+`trackCorrectionStore.js` guarda un set disperso de keyframes de corrección
+— deltas `{dcx, dcy, dangle, dHalfLen, dHalfDepth}` sobre `cx/cy/angle/
+halfLen/halfDepth` — que se suman al pose crudo de `bodyTrack.js`. Fuera del
+rango de frames donde pusiste keyframes la corrección es exactamente cero: al
+revés que el `TrackingStore` de `horse/` (que sostiene un keyframe hasta el
+borde del clip), acá una corrección puesta en un frame malo no se filtra al
+resto del loop. `trackCorrectionEditor.js` la dibuja como dos elipses — la
+trackeada cruda punteada, la corregida (la que realmente se renderiza) sólida
+— y se usa pausado (`espacio`, `,`/`.` para pisar frame a frame): arrastrar
+mueve `dcx/dcy`, `[`/`]` rota, `-`/`=` escala.
+
+Solo uno de los dos editores (`?anchors` / `?track`) tiene el canvas a la vez.
+
+### Un tercer caso: puntos sueltos, en frames sueltos
+
+Ninguno de los dos de arriba sirve cuando lo que está mal no es ni el arco
+completo (constante, para todo el clip) ni el cuerpo entero (todos los roots
+juntos): es que un punto de una aleta se desfasa en un momento puntual, y
+otro punto de otra aleta se desfasa en un momento distinto — no hay un solo
+offset ni una sola corrección de pose que arregle los dos a la vez.
+
+Por eso el editor de anclas (`e`) tiene dos modos, tecla `f` para cambiar:
+
+- **global** (el de siempre) — arrastrar mueve el punto para todo el clip.
+- **frame** — arrastrar solo afecta el frame actual (pausa sola si hace
+  falta), con la misma regla de siempre: cero fuera del rango de keyframes
+  puestos para ESE punto puntual (`finAnchorFrameStore.js`). Un fantasma
+  blanco muestra la posición base sin corregir, para ver la distancia del
+  ajuste.
+
+Las tres capas se apilan: `arc` base (editor global) → corrección de pose del
+cuerpo (`?track`) → corrección de este punto en este frame (modo `frame`).
+Cada una vive en su propio slot de `localStorage` y no se pisan entre sí.
 
 ## Lo que no se ha podido medir
 

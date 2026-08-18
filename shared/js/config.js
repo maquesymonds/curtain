@@ -22,8 +22,17 @@ export const CONFIG = {
     wind: true, // procedural breeze
     swell: false, // water: travelling wave along each strand (see swell.js)
     collision: false, // push particles out of the body primitives / mask
+    // A steady force pushing every particle away from the body's centre (not
+    // its surface, like collision does) — see radialPush below. Off by
+    // default: it only means something for a collider that exposes a body
+    // centre (cx/cy/cover), which willow's mask-based one does not.
+    radialPush: false,
     cohesion: true, // lateral springs between neighbouring strands
     bendReturn: true, // root stiffness, pulls top particles toward rest
+    // A curvature-resisting pull along the WHOLE strand — see bendStiffness
+    // below and the note on hairSystem.js's _bendStiffness(). Off by default;
+    // bendReturn already covers what every piece has wanted at the root.
+    bendStiffness: false,
     loopConverge: false, // retired; see the horse config for the history
     pointerInteraction: false, // not wired yet
     glow: false, // bake a halo into each glyph
@@ -234,6 +243,10 @@ export const CONFIG = {
   // piece had). Above 1 grips the first particle harder and lets go faster after it,
   // turning "stiff then free" into a gradient.
   bendReturnCurve: 1,
+  // How hard every free particle is pulled straight toward its two neighbours'
+  // midpoint, each solver iteration — requires systems.bendStiffness. 0 (off)
+  // leaves a strand exactly as floppy as pure distance constraints make it.
+  bendStiffness: 0,
   drapeX: -0.012, // sideways "fall" bias so strands drape to the near side
 
   // ----- WIND (procedural) -------------------------------------------------
@@ -314,6 +327,14 @@ export const CONFIG = {
   // Fraction of a strand, from the root, exempt from collision. 0 = collide all.
   // Raise it for a strand that grows OUT of the body rather than past it.
   collisionFromDepth: 0,
+  // A constant outward FORCE from the body centre (requires systems.radialPush
+  // and a collider that exposes one — see hairSystem.js). Different from
+  // collision: collision only reacts once a particle is already inside the
+  // body; this pushes every particle outward all the time, which is what
+  // keeps a strand from folding back toward the centre in the first place
+  // instead of only correcting it after the fact. Scales toward the tip like
+  // every other lateral force, so the root stays anchored.
+  radialPush: 0,
 
   // ----- RENDER / ROOT BAND (static-photo pieces only) --------------------
   rootBand: false,

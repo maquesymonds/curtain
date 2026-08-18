@@ -42,23 +42,53 @@ export const CONFIG = configure({
     // across the fish's flank. An analytic ellipse from the tracking, not a mask
     // — see bodyCollider.js.
     collision: true,
+    // Added while chasing a boomerang-related collapse: a fin that gets
+    // knocked toward the body should have somewhere to go BACK to, not just
+    // get stopped at the skin. bodyCollider.js exposes a real cx/cy/cover, so
+    // this actually does something here — see hairSystem.js.
+    radialPush: true,
     cohesion: true, // holds each fin together as one membrane
     bendReturn: true, // keeps the rays anchored in their fan direction
+    // rootStiffness/bendReturn only cover the first few particles near the
+    // root — a long ray past that is pure distance constraints, which do not
+    // resist bending at all. This is what actually raises the ceiling on
+    // "more rigid" past what rootStiffness=10 (its max) can reach.
+    bendStiffness: true,
     glow: true,
+    // Was off (default). Turned on via ?controls, along with pointer.radius
+    // and pointer.decay below — the cursor now brushes the fins and the
+    // parting lingers a long time (decay 0.99).
+    pointerInteraction: true,
   },
 
   video: {
-    src: "fish-loop.mp4",
+    // Forward pass (fish-loop.mp4, chosen by searching every (start, length)
+    // pair for the smallest pose jump at the cut — 30 px / 1.82° against
+    // 109 px / 4.19° untrimmed) played forward then reversed back-to-back:
+    // 118 frames, ~4.92 s, verified frame-by-frame to repeat nothing at either
+    // seam. Played natively forward the whole time — no per-frame JS seeking —
+    // so the fish never has to jump back to frame 0, it just swims backward.
+    src: "fish-loop-boomerang.mp4",
     width: 1920,
     height: 1080,
     fps: 24,
-    // 60 frames. Chosen by searching every (start, length) pair for the smallest
-    // pose jump at the cut: 30 px and 1.82°, against 109 px and 4.19° for the
-    // untrimmed clip. It is also 0.99 of one 2.52 s beat, which is why
-    // windPeriod below can be 2.5 and have the wave close with the video.
+    // STILL 2.5 s / 60 frames — the length fish-tracking.json was measured
+    // over, NOT the length of the file above. Every pose lookup folds the raw
+    // (doubled) playback time back into this domain first — see boomerangTime
+    // in bodyTrack.js. Changing this without re-measuring the tracking data
+    // would desync the two.
     duration: 2.5,
   },
   tracking: "fish-tracking.json",
+
+  // ----- FIN SHAPE -----------------------------------------------------------
+  // Each fin's own `spread` (how wide its fan opens) is authored per fin in
+  // fins.js's FINS table — deliberately NOT here, because the five fins open
+  // by very different amounts on purpose (the pectoral is a tight little fan,
+  // the caudal a wide veil). This is a single multiplier over ALL of them at
+  // once, for "every fan wider" without hand-editing five numbers. 1 = exactly
+  // what fins.js says; below 1 narrows every fin, above 1 widens every fin.
+  finSpreadScale: 2, // via ?controls, top of its range (was 1)
 
   // ----- TEXT --------------------------------------------------------------
   // A pool, not words: a fin should read as data moving through water, and any
@@ -84,7 +114,7 @@ export const CONFIG = configure({
   //   glow  #ff4a00  the light it throws — deeper and REDDER than the tube, which
   //                  is what makes it read as light rather than as a blurred copy:
   //                  a real halo loses the short wavelengths first.
-  color: "#ff7a18",
+  color: "#c63205",
   glyphBloom: { passes: 3, blur: 9, alpha: 0.3, color: "#ff4a00" },
   glyphCore: { alpha: 0.55, color: "#fff0d0" },
   fontWeight: 300,
@@ -114,15 +144,18 @@ export const CONFIG = configure({
     alpha: [1.0, 0.34],
     glow: [1.0, 0.12], // near strands self-lit, deep ones almost matte
     haze: [0.0, 0.72],
-    hazeColor: "#04161c", // the clip's dark teal
+    hazeColor: "#24a067", // was "#04161c" (the clip's dark teal) — now a green via ?controls
     // THE WHITE. Same move as willow, whose green strands run to a near-white
     // #eafff0 at their roots — the white is not a second colour, it is where each
     // strand's own ramp STARTS. Tinted toward the orange the way willow's is
     // tinted toward its green, so it reads as the hot core of the tube and not as
     // a grey cap dropped on top.
-    highlightColor: "#fff3e8",
+    // Moved via ?controls to "#cd776f" — a muted rose, no longer near-white.
+    // The "REGLA 1: roots go properly white" reasoning above no longer holds
+    // literally; worth knowing if the root glow stops reading as hot.
+    highlightColor: "#cd776f",
     highlight: 0.78, // pushed past willow's 0.6: the roots go properly white
-    highlightGlow: 2.2,
+    highlightGlow: 1.8, // via ?controls, was 2.2
     // REGLA 1 is about WHERE the brightness comes from (the strand's own start);
     // these two are about the SHAPE of that ramp, which is the only legitimate
     // place to fix a glow that reads wrong.
@@ -158,7 +191,9 @@ export const CONFIG = configure({
   // reads as a drawn filament. The reference works the same way: small characters,
   // long elegant lines. Not microscopic — 11px is still legible as type.
   fontSize: 11,
-  segmentLength: 8,
+  // Back near the measured 8 via ?controls (was 6.9 for one session, tighter
+  // than the pairing above; now close to it again).
+  segmentLength: 8.95,
   minParticles: 10,
   maxParticles: 170, // the caudal runs ~1.45x the half-length at 8px a character
   lengthProfile: [1], // ignored; every root carries an absolute lengthPx
@@ -170,9 +205,16 @@ export const CONFIG = configure({
   // drew a circle under the fish. Halved here and the per-fin `drape` cut to ~0.12
   // in fins.js, with a much tighter absolute cap: enough for a directional bend,
   // never enough for a U.
-  curveBias: 0.07,
-  maxArcPx: 62,
-  drapeSpread: 0.008,
+  //
+  // ??? Moved via ?controls to 0.6 / 300 — the top of BOTH sliders' ranges, and
+  // the exact combination this comment says draws a circle under the fish
+  // (0.14 was enough; this is 4x that). Left as pasted, but almost certainly
+  // reopens the loop bug rather than fixing the "amontonado" look — if fins
+  // are still curling after this, put these back near 0.07 / 62 FIRST, before
+  // chasing anything else, and see what's left.
+  curveBias: 0.6,
+  maxArcPx: 300,
+  drapeSpread: 0.08, // was 0.008 — also at the top of its range now
   // Strong taper. The reference filaments come off the body with weight and end in
   // fine points; 0.82 barely thinned them at all.
   tipScale: 0.5,
@@ -205,18 +247,22 @@ export const CONFIG = configure({
   // loose characters are the single thing that most makes this read as a cloud of
   // glyphs rather than a fin. A hint of it keeps the tips from ending on a ruled
   // line; more than that and the fin dissolves.
-  frayFrom: 0.88,
+  frayFrom: 1, // moved via ?controls from 0.88 — no fray at all now (span is empty above 1)
   frayAmount: 0.18,
 
   // ----- PHYSICS -----------------------------------------------------------
-  gravity: 0.004, // 6% of the willow's 0.062. Neutral buoyancy, near enough.
+  gravity: 0.003, // via ?controls — back down near the original 0.004/6%.
   // INERTIA, not drag. Water is viscous but it is also HEAVY: a fin does not stop
   // when the fish stops, it keeps going and settles. 0.86 was bleeding velocity
   // fast enough that the tips arrived almost with the root and the secondary
   // motion — the whole reason a veil tail is worth animating — never developed.
-  damping: 0.89, // 0.92 kept the lag but let the fins swing further than the reference
-  iterations: 7,
-  rootStiffness: 3,
+  // Moved to 0.76 via ?controls — further still BELOW the 0.86 floor above.
+  // iterations also maxed out (14, was 7) in the same pass, which pulls the
+  // other way (more constraint-solver passes = stiffer overall) — the two are
+  // fighting each other, low damping loosening what high iterations tightens.
+  damping: 0.76,
+  iterations: 14,
+  rootStiffness: 10,
   // Measured: at 0.17 with a 46px reach the rays of a fan welded into one solid
   // sheet — the fin moved as a paddle and the gaps between rays closed, which is
   // what turned the caudal into a butterfly wing. A fin membrane is held by its
@@ -224,45 +270,107 @@ export const CONFIG = configure({
   // Neighbouring rays should move as a GROUP, not as 94 independent strands. Raised
   // just enough to couple a ray to the two either side of it — beyond ~34px it
   // starts welding the fan into the solid paddle that was measured before.
-  cohesion: 0.085,
-  cohesionMaxDist: 32,
+  //
+  // cohesion 0.02 / cohesionMaxDist 9.5 — still under the 32/34px "welds into
+  // a paddle" reference. These two are a STABILISER: they hold whatever
+  // spacing the fan was BUILT at, they don't pull it anywhere on their own.
+  cohesion: 0.02,
+  cohesionMaxDist: 9.5,
+  cohesionClump: 0.535, // back up from 0
+  // Back to 0 via ?controls — the fan-closing mechanism, off again.
+  cohesionPull: 0,
   // Lowered from 0.02: this is the spring that pulls the top of a strand back to
   // its built angle, and it was most of why the fins looked stiff and "poco
   // libres". Enough to keep a ray rooted in its fan direction, not enough to stop
   // it drifting where the water takes it.
   bendReturn: 0.011,
-  drapeX: 0, // no sideways "fall": there is no down here to fall toward
+  // Back to 4 via ?controls — the root/free taper fix, restored.
+  bendReturnCurve: 4,
+  // NEW: resists bending along the WHOLE strand, not just the root zone — see
+  // systems.bendStiffness above and _bendStiffness() in hairSystem.js. This is
+  // the real ceiling-raiser for "more rigid" once rootStiffness (already
+  // maxed at 10) stops being enough. Starting point, not measured — a strand
+  // fully welded straight is not a fin either, so tune by eye against how much
+  // curve the reference actually shows.
+  bendStiffness: 0.07, // via ?controls, was 0.12
+  drapeX: -0.03, // moved via ?controls from 0 — top of its range, a leftward bias
   // The first 18% of a strand is the ATTACHMENT and is allowed to lie on the
   // fish. Without this the collider shoved the caudal's base off the peduncle and
   // reopened the very gap the new root positions were meant to close.
   collisionFromDepth: 0.18,
+  // Moved via ?controls to 0.03 — the top of its range. No longer "small on
+  // purpose"; at the max this will visibly puff every fin out from rest, not
+  // just help a knocked strand recover.
+  radialPush: 0.03,
+
+  // WHIP DAMPER. The boomerang turnaround is a hard, instant reversal of the
+  // body's own velocity — the source footage doesn't ease to a stop, so
+  // neither does the tracked pose (see boomerangHalf in bodyTrack.js). A fin
+  // root pinned to that reverses with it; the rest of the strand still has
+  // inertia going the old way, and that mismatch is what reads as a whip
+  // crack. This does not stiffen the fins generally — it drops damping HARD
+  // for a few frames starting exactly at the direction switch, so the shock
+  // gets absorbed on the spot instead of ringing through the rest of the beat.
+  whipDamper: {
+    // How many rendered frames the extra drag lasts. Too few and the crack
+    // isn't fully caught; too many and it reads as the fin going momentarily
+    // limp right when the water motion should be reversing too.
+    // Moved via ?controls from 6 to 20 — but see factor just below.
+    frames: 20,
+    // Multiplies CONFIG.damping for those frames. Lower = harder brake.
+    // Moved via ?controls to 1 — which is IDENTITY, i.e. this whole system is
+    // now a no-op regardless of `frames`. If the whip crack itself is still
+    // the problem (not the clumping from curveBias/cohesion above), this is
+    // the first thing to put back down toward ~0.35.
+    factor: 1,
+  },
+
+  // How many frames EARLY a fin's `flap` table (fins.js) is read — the
+  // pectoral's own tracked beat looked like it lagged the footage; this
+  // shifts the lookup forward to compensate. Raised from 3: now that pinDepth
+  // (fins.js) glues the base with no spring involved, bendReturn's own lag is
+  // ruled out as a cause for that portion — what's left reading late is most
+  // likely just the by-eye keyframes themselves sitting a couple of frames
+  // behind. 0 = read exactly on frame. Still not measured — this is a panel
+  // slider (agua.flapLead) precisely so it can be walked in live instead of
+  // guessed blind from here.
+  flapLead: 6,
 
   // ----- SWELL -------------------------------------------------------------
   windPeriod: 2.5, // = the trimmed clip. One beat, so the wave closes with it.
   swell: {
-    cycles: 1, // one beat per loop, matching the measured 2.52 s
+    // Walked back via ?controls to 2 (was 4, briefly) — two beats per loop.
+    // Still an integer, still closes with the video.
+    cycles: 2,
     // NOT MEASURED — see the header. 0.75 puts about three quarters of a
     // wavelength along a strand, which gives one clear S-bend developing toward
     // the tip. Below ~0.4 the fin flexes as one rigid sheet; above ~1.5 it
     // corrugates and reads as a flag. Starting point, to be tuned against the
     // reference by eye and by re-running the tip-travel measurement.
-    wavelengths: 1.1,
+    wavelengths: 1.05, // via ?controls, was 1.1 — negligible change
     // Measured, and this one was backwards. At 1.6 the mid-strand got only 0.33 of
     // the tip's force — but mid-strand is exactly where a bend has to form, so the
     // short fins could not hold a wave at all and pivoted about their roots as
     // rigid sticks (phase along the pectoral was flat: -38°, -32.8°, -32.1°,
     // -39.6°). A steep envelope starves the wave instead of shaping it.
-    envelope: 1.15,
+    // ??? Back to 0.85 via ?controls (was 2) — BELOW 1 again, the direction
+    // that amplifies root force instead of deadening it (0.1^0.85=0.141 vs
+    // 0.1^1=0.1). This is the same direction as the 0.5 that caused the
+    // original curling, just milder (+40% at the root, not ~9x) — and at the
+    // current strength (0.21, well under the 0.44 that combined with 0.5 to
+    // cause it), the risk is real but small. First thing to raise back above
+    // 1 if curling shows up again.
+    envelope: 0.85,
     // Raised with it: the force has to beat the length constraints to bend the
     // chain, and below ~0.2 the solver wins and every fin moves as one piece.
-    strength: 0.22, // paired with the raised damping: same travel, less excursion
-    drift: 0.02, // weak churn so the mass shimmers
-    scale: 0.005,
+    strength: 0.21, // via ?controls, was 0.22 — negligible change
+    drift: 0, // off again via ?controls (was 0.062)
+    scale: 0.0028,
     // Phase offsets, applied in fins.js. The four fins share the beat but not the
     // instant, and rays within one fin fan out in time as well as in space —
     // that temporal fan is most of what separates a fin from a sheet of paper.
     finPhase: 0.55, // radians between one fin group and the next
-    arcPhase: 0.9, // across a single fin's arc, root to root
+    arcPhase: 0.45, // via ?controls, was 0.9 — rays across one fin's arc more in sync
     jitterPhase: 0.35, // per-strand scatter
   },
 
@@ -275,10 +383,12 @@ export const CONFIG = configure({
   // the water, not to replace them — so it is now a quarter of that dose.
   lightWash: {
     enabled: true,
-    scale: 0.25,
-    every: 6, // willow's sampling: fewer, wider blobs read as light, not as fog
+    scale: 0.6, // moved via ?controls from 0.25 — top of its range, full resolution
+    every: 3, // willow's sampling: fewer, wider blobs read as light, not as fog
     everyFrames: 4,
-    radius: 34,
+    radius: 34.5,
+    // Was unset (shared default 0, no blur pass). Added via ?controls.
+    blur: 7.95,
     alpha: 0.02,
     color: "#ff4a00", // the halo colour, so the spill on the scales matches the glow
     ground: 0, // no "below": light spills evenly in water, not downward
@@ -286,17 +396,27 @@ export const CONFIG = configure({
   },
 
   pointer: {
-    radius: 120,
+    radius: 91.5, // via ?controls, was 120
     push: 0.4,
-    drag: 0.12,
+    drag: 0.3, // via ?controls, was 0.12
     displace: 0.4,
-    falloff: 1.5,
-    decay: 0.85,
+    falloff: 2.55, // via ?controls, was 1.5 — sharper falloff, more contained to the cursor
+    decay: 0.5, // via ?controls, was 0.99 — now decays FAST, opposite of last pass
   },
+
+  // seconds moved by ← / → while paused; frame-exact stepping is , / . instead
+  seekCoarse: 0.25,
 
   keys: {
     diagnostics: "d",
     controls: "t", // show/hide the ?controls panel. Free in all three pieces.
+    finAnchors: "e", // show/hide the fin anchor (root arc) editor, ?anchors
+    trackFix: "r", // show/hide the per-frame tracking correction editor, ?track
+    playPause: " ",
+    seekBack: "arrowleft",
+    seekForward: "arrowright",
+    frameBack: ",",
+    frameForward: ".",
   },
 
   dprCap: 2,

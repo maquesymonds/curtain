@@ -88,12 +88,23 @@ configure({
   // cost 2.57 ms of the 41.7 ms a 24fps frame has — 6.2%. Baking all 13 buckets is
   // 8.5 ms, once, on build or resize.
   color: "#ff5fcb", // body: H 318° S 63% V 100%, lum 141
-  fontSize: 17.2, // over the shared 16, against an unchanged segmentLength of 16
+  // ??? Moved via ?controls to 12.75 — BELOW segmentLength, which is still the
+  // shared default of 16 here (horse never overrides it). This is exactly the
+  // relationship the fish's own config.js documents as the "confetti" bug:
+  // below the glyph size, characters space out further than they are wide and
+  // a strand reads as a row of dots instead of a continuous line. Was 17.2,
+  // deliberately kept ABOVE 16 for that reason. Worth checking against the
+  // reference before keeping this.
+  fontSize: 12.75,
+  fontWeight: 100, // via ?controls — was the shared default 300 (not overridden before)
   glowIntensity: 1.45, // tight halo on the body pass, under the wide bloom
   glyphBloom: {
-    passes: 4,
-    blur: 14.2,
-    alpha: 0.28,
+    passes: 5, // via ?controls, top of its range (was 4)
+    // Bigger bloom = bigger padding per glyph bitmap = more fill-rate cost —
+    // see the measured box-size table above (70px at passes 4 / blur 14.2).
+    // This is past that.
+    blur: 17.9, // via ?controls, was 14.2
+    alpha: 0.235, // via ?controls, was 0.28
     color: "#ff1493", // deep pink: the halo stays more saturated than the body
   },
   glyphCore: {
@@ -105,7 +116,10 @@ configure({
     color: "rgba(70, 0, 40, 0.55)",
   },
   minAlpha: 0.86,
-  tipFade: 0, // the depth ramp already dims what recedes; this was doubling it
+  // Moved via ?controls to 0.145 — was 0 on purpose ("the depth ramp already
+  // dims what recedes; this was doubling it"). Back on now means that
+  // doubling is back too.
+  tipFade: 0.145,
 
   // ----- THE LIGHT THE MANE THROWS ON THE HORSE -----------------------------
   // Was off, and that absence was a large part of why the letters read as pasted on.
@@ -130,9 +144,9 @@ configure({
     radius: 16,
     alpha: 0.028,
     intensity: 2,
-    blur: 4,
+    blur: 6.45, // via ?controls, was 4
     rootBoost: 3,
-    color: "#ff2fa8",
+    color: "#991d5a", // via ?controls, was "#ff2fa8" — darker, less saturated
     ground: 0,
     groundOffset: 0,
   },
@@ -377,8 +391,12 @@ configure({
     // 121 frames, the unsmoothed offset line put two roots 0.14px apart while others
     // sat 41px apart. 32 passes here take the spacing spread (p95/p05) from 4.3x to
     // 2.6x; past ~40 the curve starts leaving the anatomy behind.
+    //
+    // ??? Moved via ?controls to 64 — the top of the panel's range, and well
+    // past that measured ~40 where the smoothed curve stops tracking the real
+    // crest. Worth checking the roots still land where the anatomy actually is.
     crestSamples: 128,
-    crestSmoothPasses: 32,
+    crestSmoothPasses: 64,
     // Samples used for the arc-length walk the roots are spaced along. 400 is what
     // the editor uses on the same curve.
     arcSamples: 400,
@@ -416,11 +434,12 @@ configure({
   // as a pair of numbers, but there are ~6 strands between two pen points, so on screen
   // it is a gradient of about 18px per strand — the body of the mane keeps its length.
   lengthProfile: [0.14, 0.16, 0.2, 0.28, 0.42, 0.78, 0.94, 1.0, 0.96, 0.88, 0.8, 0.7, 0.59, 0.5],
-  lengthRange: [70, 360],
+  lengthRange: [86, 408], // via ?controls, was [70, 360] — both ends up
   // Base organic wobble on top of the profile. Deliberately small — the zone-by-zone
   // variation that matters lives in maneShape.lengthJitterByU, so the raggedness is
   // where a mane actually is ragged instead of spread evenly over the whole crest.
-  lengthJitter: 0.06,
+  // Moved via ?controls to 0.125, roughly double.
+  lengthJitter: 0.125,
 
   // The four knobs that separate a hanging strand from a column of set type. All of
   // these were at their neutral default here, which is why the mane read as 84
@@ -448,9 +467,13 @@ configure({
   // the silhouette this whole rewrite is about.
   hideRootGlyph: false,
 
-  // Slightly above the shared 0.14, so neighbouring strands travel together enough to
-  // read as a shared mass rather than as independent columns.
-  cohesion: 0.24,
+  // Was 0.24 (slightly above the shared 0.14, so neighbouring strands travel
+  // together enough to read as a shared mass rather than as independent
+  // columns) — via ?controls, down to 0.02, close to off. Strands likely read
+  // more like independent columns again.
+  cohesion: 0.02,
+  // Not previously set here (shared default 70) — via ?controls, 89.
+  cohesionMaxDist: 89,
   // BOTH DELIBERATELY OFF, and this is the interesting part. The mane does need to
   // separate into locks with gaps between them rather than space itself out like a comb,
   // and the obvious lever looked like uneven cohesion — bond some neighbouring pairs
@@ -512,10 +535,16 @@ configure({
   // out of the radius, which the solver then relaxes, instead of fighting the length
   // constraints with a force. See the long note in shared/js/config.js.
   pointer: {
-    radius: 100,
+    radius: 114, // via ?controls, was 100
     falloff: 1.8,
-    push: 0.6,
-    drag: 0.18,
+    // ??? Was 0.6, via ?controls now 1.6. shared/js/config.js's own measured
+    // note on this exact parameter: "the deflection peaks around 0.5 and gets
+    // WORSE by 2.0" — a force fights the length constraints, so past a point
+    // more push doesn't part the strands further, it fights itself. 1.6 is
+    // deep in the "worse" zone that note describes. `displace` below is what
+    // actually does the parting; push layers a force on top of it.
+    push: 1.6,
+    drag: 0.35, // via ?controls, was 0.18
     displace: 0.5,
     decay: 0.82,
   },

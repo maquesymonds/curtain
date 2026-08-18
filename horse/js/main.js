@@ -44,6 +44,7 @@ import { TrackingSource } from "./trackingSource.js";
 import { Silhouette } from "./silhouette.js";
 import { stageReady, onStage } from "../../shared/js/stage.js";
 import { attachPointer, decayPointer } from "../../shared/js/pointer.js";
+import { notifyPointerHit } from "../../shared/js/interactionSound.js";
 
 const IDENTITY = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
 const TAU = Math.PI * 2;
@@ -1029,6 +1030,7 @@ function startVideoLoop() {
       // roots follow the tracked crest (tracking, not physics — always on)
       applyManeFrame(mediaTime);
       hair.update(dt, mediaTime); // no-op when every subsystem is off
+      notifyPointerHit(hair.pointerHit);
       // After the forces have been applied, so a flick pushes once and then lets go.
       decayPointer(CONFIG.pointer.decay);
     }
@@ -1220,6 +1222,7 @@ function staticLoop(now) {
   const dt = Math.min((now - lastPerf) / 16.6667, 2.2) || 1;
   lastPerf = now;
   hair.update(dt, now / 1000);
+  notifyPointerHit(hair.pointerHit);
   decayPointer(CONFIG.pointer.decay);
   renderStatic();
 }

@@ -25,6 +25,7 @@ import { StrandStore } from "./strandStore.js";
 import { StrandEditor } from "./strandEditor.js";
 import { sampleBranchStrands } from "./branchSampler.js";
 import { attachPointer, decayPointer } from "../../shared/js/pointer.js";
+import { notifyPointerHit } from "../../shared/js/interactionSound.js";
 import { stageReady, onStage } from "../../shared/js/stage.js";
 
 const IDENTITY = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
@@ -206,7 +207,10 @@ function loop(now) {
       rebuild();
       settle(CONFIG.controlsSettleSteps);
     }
-    if (hair) hair.update(dt, clock);
+    if (hair) {
+      hair.update(dt, clock);
+      notifyPointerHit(hair.pointerHit);
+    }
     // After the forces are applied, so a flick pushes once and then releases.
     decayPointer(CONFIG.pointer.decay);
     render();

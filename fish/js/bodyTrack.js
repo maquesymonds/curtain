@@ -36,16 +36,34 @@ export class BodyTrack {
     return `${this.frames.length} frames, ${this.video.duration.toFixed(2)}s`;
   }
 
-  // Pose at a time in seconds within the loop. Wraps, and interpolates between
-  // the two bracketing frames so the roots move smoothly at any refresh rate
-  // instead of stepping at the clip's 24fps.
-  poseAt(time) {
+  // Continuous (fractional) frame position for a time in seconds, CLAMPED into
+  // [0, n-1] — not wrapped. Exposed separately from poseAt so a correction can
+  // be looked up at the exact same fractional position the raw pose
+  // interpolates at — see trackCorrectionStore.js.
+  //
+  // Clamped rather than wrapped: this used to wrap (mod n), back when the
+  // video played forward-only and time legitimately needed to cycle past the
+  // last frame back to the first. Now that playback is boomerangTime()-folded
+  // (see below), the input here is already inside [0, loopDuration] by
+  // construction, and wrapping it AGAIN would blend the last frame toward the
+  // first — exactly backward from what a reflection wants at that end, and the
+  // bug that made the fins collapse after the boomerang video shipped.
+  frameAt(time) {
     const n = this.frames.length;
-    const f = (((time * this.video.fps) % n) + n) % n;
-    const i = Math.floor(f);
-    const t = f - i;
+    return Math.min(n - 1, Math.max(0, time * this.video.fps));
+  }
+
+  // Pose at a time in seconds within the loop. Interpolates between the two
+  // bracketing frames so the roots move smoothly at any refresh rate instead
+  // of stepping at the clip's 24fps. Holds at the last frame rather than
+  // blending toward the first — see the note on frameAt.
+  poseAt(time) {
+    const f = this.frameAt(time);
+    const n = this.frames.length;
+    const i = Math.min(n - 2, Math.floor(f));
+    const t = Math.min(1, f - i);
     const a = this.frames[i];
-    const b = this.frames[(i + 1) % n];
+    const b = this.frames[i + 1];
     const mix = (k) => a[k] + (b[k] - a[k]) * t;
     return {
       cx: a.c[0] + (b.c[0] - a.c[0]) * t,
@@ -74,6 +92,66 @@ export function localToNorm(pose, u, v) {
   const ox = ca * u * pose.halfLen - sa * v * pose.halfDepth;
   const oy = sa * u * pose.halfLen + ca * v * pose.halfDepth;
   return [pose.cx + ox, pose.cy + oy * pose.aspect];
+}
+
+// Inverse of localToNorm: normalized (0..1) picture coordinates -> (u, v) in
+// body space. Used by the fin anchor editor to turn a dragged screen point
+// back into the frame the `arc` tables in fins.js are authored in.
+export function normToLocal(pose, nx, ny) {
+  const a = (pose.angle * Math.PI) / 180;
+  const ca = Math.cos(a);
+  const sa = Math.sin(a);
+  const ox = nx - pose.cx;
+  const oy = (ny - pose.cy) / pose.aspect;
+  return [(ca * ox + sa * oy) / pose.halfLen, (-sa * ox + ca * oy) / pose.halfDepth];
+}
+
+// The video FILE can be longer than the tracked loop — fish-loop-boomerang.mp4
+// is fish-loop.mp4 (60 frames) played forward then reversed back-to-back, 120
+// frames total, so the pixels play forward the whole time for smooth native
+// decoding, with no per-frame JS seeking. But fish-tracking.json is NOT
+// doubled to match — it stays the single 60-frame pass it was measured over,
+// and every hand-placed correction (trackCorrectionStore.js,
+// finAnchorFrameStore.js) is keyed to THOSE frame numbers.
+//
+// This is what reconciles the two: it folds a raw playback time over the
+// doubled file back into the tracked loop's own domain, so "frame 34" means
+// the same measured (and possibly corrected) pose whether you're seeing it on
+// the way out or its mirror image on the way back.
+//
+// NOT a plain triangle wave mirrored around loopDuration — that was the first
+// version, and it was wrong by exactly one frame's worth of time for the
+// ENTIRE reverse half, not just at the seam, because frame index n does not
+// exist: file frame n (the first frame of the reversed half) is original
+// frame n-1, not n. Confirmed empirically (SSIM), not just by the algebra:
+// file frame 90 matches original frame 29 (SSIM 0.975) far better than frame
+// 30 (0.922), which is what the naive "period = 2*loopDuration" formula would
+// have picked. The mirror point is (2n-1)/fps, one frame short of 2*loopDuration.
+export function boomerangTime(rawTime, loopDuration, fps) {
+  const n = Math.round(loopDuration * fps); // frames in the forward pass, e.g. 60
+  const fileDuration = (2 * n) / fps; // the file's own actual duration, e.g. 5.0s
+  let t = rawTime % fileDuration;
+  if (t < 0) t += fileDuration;
+  if (t <= loopDuration) return t; // forward half: identity
+  return (2 * n - 1) / fps - t; // reverse half: mirror around frame n-1's time
+}
+
+// Which of the two passes `rawTime` falls in — "fwd" while the body is
+// swimming forward through the tracked data, "rev" during its mirror image.
+// The BODY'S OWN VELOCITY genuinely reverses, hard, at every switch between
+// the two (a boomerang loop has no eased turnaround — the source footage
+// doesn't slow down before the video reverses, so neither does the tracked
+// pose). Whatever is pinned to that root inherits the same instant reversal
+// and, being flexible, whips at it while the rest of the strand's inertia
+// catches up. Exposed so main.js can catch the switch and calm the strands
+// right at that instant instead of everywhere, all the time — see the
+// "whip damper" in the render loop.
+export function boomerangHalf(rawTime, loopDuration, fps) {
+  const n = Math.round(loopDuration * fps);
+  const fileDuration = (2 * n) / fps;
+  let t = rawTime % fileDuration;
+  if (t < 0) t += fileDuration;
+  return t <= loopDuration ? "fwd" : "rev";
 }
 
 // A growth direction authored in BODY space -> the `angle` Strand wants.

@@ -68,6 +68,11 @@ export class HairSystem {
     this.cohesion = []; // soft lateral springs { a, b, len }
     this.atlas = new Map();
     this.rootScreen = []; // screen positions, for the calibration/debug overlays
+    // Set for one update() call whenever the cursor was actually within reach
+    // of at least one particle this frame — a piece uses this to trigger
+    // something (a sound, say) on real contact, not just on cursor movement
+    // anywhere near the canvas. See shared/js/interactionSound.js.
+    this.pointerHit = false;
   }
 
   // (Re)build all strands for the current cover transform + dpr.
@@ -397,7 +402,12 @@ export class HairSystem {
     );
   }
 
-  update(dt, loopTime) {
+  // `dampingBoost` multiplies CONFIG.damping for this call only — 1 (default)
+  // changes nothing. For absorbing a single-frame shock (fish's boomerang
+  // turnaround) without touching the piece's normal, permanent damping: pass
+  // something below 1 for exactly the frames where the shock happens, and 1
+  // everywhere else. See fish/js/main.js's whip damper.
+  update(dt, loopTime, dampingBoost = 1) {
     const sys = CONFIG.systems;
     if (!this.simulating) return;
 
@@ -407,6 +417,16 @@ export class HairSystem {
     const pt = CONFIG.pointer;
     const usePointer = sys.pointerInteraction && pointer.active;
     const r2 = pt.radius * pt.radius;
+    this.pointerHit = false;
+
+    // Body centre in SCREEN space, once per frame — not per particle. Only
+    // meaningful for a collider that tracks a body (fish's analytic ellipse);
+    // a mask-based one (horse, willow) has no single centre, so this silently
+    // does nothing for them regardless of the CONFIG flag.
+    const rp = sys.radialPush && CONFIG.radialPush > 0 ? this.collision : null;
+    const useRadialPush = !!(rp && rp.cover && typeof rp.cx === "number");
+    const radialCenterX = useRadialPush ? rp.cover.offsetX + rp.cx * rp.cover.drawW : 0;
+    const radialCenterY = useRadialPush ? rp.cover.offsetY + rp.cy * rp.cover.drawH : 0;
 
     for (const strand of this.strands) {
       const gain = strand.windGain ?? 1;
@@ -456,6 +476,7 @@ export class HairSystem {
           const dy = p.pos.y - pointer.y;
           const d2 = dx * dx + dy * dy;
           if (d2 < r2) {
+            this.pointerHit = true;
             const d = Math.sqrt(d2) || 1e-4;
             // Falls off to nothing at the edge of the radius, and scales toward
             // the tip: the attachment barely gives, the loose end gives a lot.
@@ -466,9 +487,17 @@ export class HairSystem {
             );
           }
         }
+        if (useRadialPush) {
+          const dx = p.pos.x - radialCenterX;
+          const dy = p.pos.y - radialCenterY;
+          const d = Math.hypot(dx, dy) || 1e-4;
+          const f = CONFIG.radialPush * p.depth;
+          p.addForce((dx / d) * f, (dy / d) * f);
+        }
       }
     }
-    for (const p of this.particles) p.integrate(dt, CONFIG.damping);
+    const effectiveDamping = CONFIG.damping * dampingBoost;
+    for (const p of this.particles) p.integrate(dt, effectiveDamping);
 
     // 1b. RETIRED loop-state correction. It dragged the free particles toward a
     // `rest` captured at build time, in absolute screen coords — which in video
@@ -521,6 +550,7 @@ export class HairSystem {
         for (const c of this.cohesion) this._solveSpring(c, CONFIG.cohesion);
       }
       if (sys.bendReturn) this._bendReturn();
+      if (sys.bendStiffness) this._bendStiffness();
       if (sys.collision && this.collision) this._collide();
     }
   }
@@ -582,6 +612,30 @@ export class HairSystem {
     }
   }
 
+  // Resists CURVATURE along the WHOLE strand — unlike bendReturn, which only
+  // holds the first `rootStiffness` particles near their built angle. Past
+  // that zone a strand is just distance constraints, which fix how far apart
+  // neighbours are but not the ANGLE between them: two rigid links joined by a
+  // free hinge, not a stiff rod, no matter how many iterations run. This pulls
+  // every free particle toward the midpoint of its two neighbours, which is
+  // the straight-line position — the harder that pull, the more a bend costs
+  // to hold, everywhere along the strand, not just at the base.
+  _bendStiffness() {
+    const k = CONFIG.bendStiffness;
+    if (!k) return;
+    for (const s of this.strands) {
+      const ps = s.particles;
+      for (let i = 1; i < ps.length - 1; i++) {
+        const b = ps[i];
+        if (b.pinned) continue;
+        const a = ps[i - 1];
+        const c = ps[i + 1];
+        b.pos.x += ((a.pos.x + c.pos.x) * 0.5 - b.pos.x) * k;
+        b.pos.y += ((a.pos.y + c.pos.y) * 0.5 - b.pos.y) * k;
+      }
+    }
+  }
+
   _collide() {
     const step = this.collision.cell * CONFIG.collisionPush;
     const raw = this.collision.rawNormal === true; // primitives push out truly
@@ -590,25 +644,35 @@ export class HairSystem {
     // when the strand GROWS OUT of one: a fin is attached, so its first characters
     // belong on the skin, and pushing them off leaves the fin floating with a gap
     // where it should join. Only the free part of the strand has to stay outside.
-    const from = CONFIG.collisionFromDepth || 0;
-    for (const p of this.particles) {
-      if (p.pinned || p.depth < from) continue;
-      const r = this.collision.resolve(p.pos.x, p.pos.y);
-      if (!r) continue;
-      let nx = r.nx;
-      let ny = r.ny;
-      if (!raw) {
-        // Static PNG ridge: never lift a strand up — hair slides off sideways,
-        // and on a near-flat top nudge toward the near side so it drapes off.
-        ny = ny > 0 ? ny : 0;
-        if (ny === 0 && Math.abs(nx) < 0.2) nx = -1;
+    //
+    // Per-strand, not a flat particle loop: a root can carry its OWN
+    // collisionFromDepth (rootDef, e.g. fins.js's pectoral) for a fin whose
+    // authored motion sweeps close to the body more than the piece's general
+    // fins do — raising the global value would loosen collision everywhere
+    // and risk the exact "glyphs poke through the belly" bug collision exists
+    // to prevent.
+    const globalFrom = CONFIG.collisionFromDepth || 0;
+    for (const strand of this.strands) {
+      const from = strand.rootDef?.collisionFromDepth ?? globalFrom;
+      for (const p of strand.particles) {
+        if (p.pinned || p.depth < from) continue;
+        const r = this.collision.resolve(p.pos.x, p.pos.y);
+        if (!r) continue;
+        let nx = r.nx;
+        let ny = r.ny;
+        if (!raw) {
+          // Static PNG ridge: never lift a strand up — hair slides off sideways,
+          // and on a near-flat top nudge toward the near side so it drapes off.
+          ny = ny > 0 ? ny : 0;
+          if (ny === 0 && Math.abs(nx) < 0.2) nx = -1;
+        }
+        const len = Math.hypot(nx, ny) || 1;
+        p.pos.x += (nx / len) * step;
+        p.pos.y += (ny / len) * step;
+        // bleed off velocity so the strand rests on the surface (no bounce)
+        p.oldPos.x = p.pos.x - (p.pos.x - p.oldPos.x) * 0.4;
+        p.oldPos.y = p.pos.y - (p.pos.y - p.oldPos.y) * 0.4;
       }
-      const len = Math.hypot(nx, ny) || 1;
-      p.pos.x += (nx / len) * step;
-      p.pos.y += (ny / len) * step;
-      // bleed off velocity so the strand rests on the surface (no bounce)
-      p.oldPos.x = p.pos.x - (p.pos.x - p.oldPos.x) * 0.4;
-      p.oldPos.y = p.pos.y - (p.pos.y - p.oldPos.y) * 0.4;
     }
   }
 

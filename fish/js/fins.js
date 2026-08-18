@@ -43,7 +43,7 @@
 // ============================================================================
 
 import { CONFIG } from "./config.js";
-import { hash, lerp, sampleProfile } from "../../shared/js/utils.js";
+import { hash, lerp, sampleProfile, smoothstep } from "../../shared/js/utils.js";
 import { normToScreen } from "../../shared/js/cover.js";
 import { localToNorm, dirToStrandAngle } from "./bodyTrack.js";
 
@@ -108,17 +108,61 @@ export const FINS = [
   },
   {
     name: "pectoral",
-    // SMALL, and kept small deliberately. It sits just behind the head and in the
-    // reference it is a short fin, not a streamer — giving it the scale of the
-    // lower fins was part of what made the underside read as one big tangle.
-    arc: [[0.46, 0.56], [0.40, 0.64]],
+    // Was SMALL on purpose — giving it the scale of the lower fins previously
+    // made the underside read as one big tangle (see the fish/README history
+    // if this needs re-litigating). Made denser and longer anyway now that it
+    // has its own tracked beat (flap, below) instead of just sitting there:
+    // worth re-checking against the reference for that same tangle before
+    // pushing count/lenMax any further.
+    // Was 2 points ([[0.46,0.56],[0.40,0.64]]) — every ray born off the same
+    // short line, which is why the curtain read as a strip glued onto part of
+    // the fin instead of growing out of its whole base. 4 points now, wider
+    // span. Rough — this is a starting shape, not a traced outline; nudge it
+    // with the anchor editor (?anchors, "e", global mode) against the actual
+    // video, which will beat guessing from a still every time.
+    arc: [[0.5, 0.5], [0.46, 0.56], [0.4, 0.64], [0.34, 0.7]],
     dirBase: 150,
-    spread: 22,
-    lenMax: 0.46,
+    spread: 34, // was 22 — wider fan
+    lenMax: 0.7, // was 0.46
     lenProfile: [0.6, 1.0, 0.72],
-    count: 10,
+    count: 16, // was 10
     zBright: -0.7, zDim: 0.2, zFade: 0.34, rays: 3,
     drape: 0.1,
+    // Overrides the piece's global collisionFromDepth (0.18) for JUST this
+    // fin's roots. The tuck half of `flap` below sweeps the ray back TOWARD
+    // the body — collision resisting that is what capped the retract short
+    // of the full authored angle, direction the other fins never sweep in.
+    // Raising the global value instead would loosen collision for every fin,
+    // and collision exists specifically because pectoral/anal rays got pushed
+    // through the belly without it. Starting point, not measured.
+    collisionFromDepth: 0.45,
+    // GLUED, not just held — the fraction of the ray (from the root) that
+    // tracks the real fin's tracked position and angle EXACTLY, no bendReturn
+    // spring, no lag, the same way the single root particle already does.
+    // Past this depth the curtain lets go and is ordinary physics. Rough
+    // starting value for "about where the real fin ends" — the honest way to
+    // pin it down is to watch the reference and see where the curtain stops
+    // matching it.
+    pinDepth: 0.4,
+    // THE REAL FIN'S OWN BEAT — not swell. Unlike the other four fins, the
+    // reference pectoral does not just get bent by the water: it sweeps on
+    // its own, faster than the body's 2.5s cycle — about three beats per
+    // loop. Read by eye off 30 frames sampled every 2, cropped and centred on
+    // the fin using the body tracking (fish-tracking.json) so the crop
+    // followed the fish instead of a fixed box. NOT a pixel measurement —
+    // there is no way to segment a same-colour, translucent, fast-moving fin
+    // from the body by a colour mask the way the whole-body pose was — but
+    // the sweep-forward / tuck-back rhythm and its timing are read off the
+    // actual footage, not invented. Degrees, ADDED to dirBase: negative sweeps
+    // forward (toward the snout), positive tucks back toward the body.
+    // [frame, deg] — wraps smoothly from the last pair back to the first.
+    flap: [
+      [0, 10], [2, 5], [4, 8], [6, 5], [8, -15], [10, -25],
+      [12, -30], [14, -35], [16, -10], [18, 25], [20, 35], [22, 30],
+      [24, 10], [26, 5], [28, -15], [30, -25], [32, -5], [34, 30],
+      [36, 35], [38, 15], [40, 0], [42, 5], [44, 0], [46, 0],
+      [48, 30], [50, 10], [52, -20], [54, -30], [56, -25], [58, 10],
+    ],
   },
   {
     name: "pelvic",
@@ -171,6 +215,42 @@ function alongArc(arc, s) {
   return [lerp(a[0], b[0], f), lerp(a[1], b[1], f)];
 }
 
+// The 60-frame tracked loop's own length (fish-tracking.json) — `flap`
+// keyframes above are authored against this, same domain as trackCorrection/
+// finAnchorFrame's `frame` argument.
+const FLAP_FRAME_COUNT = 60;
+
+// Wrapped interpolation across a fin's `flap` keyframes: smoothstep between
+// the two bracketing entries, wrapping from the last one back to the first
+// (frame count away, not frame 0) so a fin that beats on its own reads as a
+// continuous cycle, not a table that resets. Returns 0 for a fin with no
+// `flap` table.
+//
+// `lead` (CONFIG.flapLead, frames) shifts the lookup EARLIER — compensates
+// for the rig reading late, whichever of two reasons that turns out to be:
+// the by-eye keyframes themselves landing a frame or two behind the real
+// footage, or bendReturn's spring not being stiff enough to reach a fast-
+// moving target on time. Wrapped the same way `frame` itself is, so a lead
+// that pushes past frame 60 (or before 0) still lands correctly.
+function flapAngleAt(fin, frame, lead = 0) {
+  const kf = fin.flap;
+  if (!kf || !kf.length) return 0;
+  const n = kf.length;
+  const wrapped = (((frame + lead) % FLAP_FRAME_COUNT) + FLAP_FRAME_COUNT) % FLAP_FRAME_COUNT;
+  let ai = n - 1;
+  for (let i = 0; i < n; i++) {
+    if (kf[i][0] <= wrapped) ai = i;
+    else break;
+  }
+  const bi = (ai + 1) % n;
+  const [fa, da] = kf[ai];
+  const [fbRaw, db] = kf[bi];
+  const fb = fbRaw <= fa ? fbRaw + FLAP_FRAME_COUNT : fbRaw;
+  const f = wrapped < fa ? wrapped + FLAP_FRAME_COUNT : wrapped;
+  const t = fb === fa ? 0 : smoothstep(0, 1, (f - fa) / (fb - fa));
+  return da + (db - da) * t;
+}
+
 // Build the root descriptors HairSystem.build() consumes. Everything that has to
 // survive to the per-frame update — the body-local position, the fan direction —
 // is stashed on the descriptor, which arrives back as `strand.rootDef`.
@@ -183,7 +263,11 @@ export function buildFinRoots(pose, cover) {
     for (let i = 0; i < fin.count; i++) {
       const s = fin.count === 1 ? 0.5 : i / (fin.count - 1);
       const [u, v] = alongArc(fin.arc, s);
-      const dirDeg = fin.dirBase + (0.5 - s) * fin.spread;
+      // CONFIG.finSpreadScale is a global multiplier over every fin's own
+      // authored `spread` — 1 leaves the table above untouched. It's the only
+      // lever for "all the fans open wider" that doesn't mean re-authoring
+      // five numbers in this file by hand.
+      const dirDeg = fin.dirBase + (0.5 - s) * fin.spread * CONFIG.finSpreadScale;
       const [nx, ny] = localToNorm(pose, u, v);
 
       const h = hash(index * 9.17);
@@ -215,6 +299,12 @@ export function buildFinRoots(pose, cover) {
         zTip: Math.min(1, zFor(fin, s, index) + fin.zFade),
         drape: fin.drape * (0.75 + hash(index * 2.53) * 0.5),
         windGain: 0.85 + hash(index * 6.71) * 0.4,
+        // Per-fin override, read by hairSystem.js's _collide(); undefined for
+        // every fin but pectoral, which falls back to CONFIG.collisionFromDepth.
+        collisionFromDepth: fin.collisionFromDepth,
+        // Read directly above in updateFinRoots — undefined (0) for every fin
+        // but pectoral.
+        pinDepth: fin.pinDepth,
       });
       index++;
     }
@@ -228,7 +318,21 @@ export function buildFinRoots(pose, cover) {
 // and `bendReturn` quietly drags every fin back toward it; over the 3.9° this
 // clip turns that is small but it is exactly the lag that made the horse's mane
 // trail behind its head.
-export function updateFinRoots(hair, pose, buildPose, cover) {
+//
+// `frameStore` (finAnchorFrameStore.js) + `frame` are optional: a per-frame
+// nudge on individual arc CONTROL points, layered on top of the (possibly
+// hand-edited) base arc, for the drift that shows up on a handful of roots at
+// a handful of frames rather than the whole fan or the whole clip. Computed
+// once per FIN here, not per strand — at most 5 fins x <=5 points, trivial
+// next to the ~82 particles below — and skipped entirely when the store is
+// empty, so a piece with no per-frame corrections pays nothing for this.
+//
+// `frame` is also what drives `flap` (the pectoral's own beat, read off the
+// reference by eye — see its FINS entry): unlike the other four fins, which
+// only ever rotate by however much the BODY has turned (`da`), a fin with a
+// `flap` table adds its own tracked sweep on top, per fin, still once here
+// and not per strand.
+export function updateFinRoots(hair, pose, buildPose, cover, frameStore, frame) {
   const da = ((pose.angle - buildPose.angle) * Math.PI) / 180;
   const ca = Math.cos(da);
   const sa = Math.sin(da);
@@ -237,11 +341,35 @@ export function updateFinRoots(hair, pose, buildPose, cover) {
   // scaling the rest offsets covers it.
   const k = pose.halfLen / buildPose.halfLen;
 
+  const correctedArcs =
+    frameStore && frameStore.count > 0
+      ? new Map(FINS.map((fin) => [fin.name, frameStore.correctedArc(fin.name, fin.arc, frame)]))
+      : null;
+
+  // Per-fin rotation for fins with their OWN beat (currently just the
+  // pectoral — see `flap` on its FINS entry): `da` plus that fin's angle at
+  // this frame, computed once per fin here rather than per strand. Fins
+  // without a `flap` table just get `ca`/`sa`, unchanged from before this
+  // existed.
+  let flapRot = null;
+  for (const fin of FINS) {
+    if (!fin.flap) continue;
+    if (!flapRot) flapRot = new Map();
+    const rad = da + (flapAngleAt(fin, frame, CONFIG.flapLead) * Math.PI) / 180;
+    flapRot.set(fin.name, [Math.cos(rad), Math.sin(rad)]);
+  }
+
   for (let i = 0; i < hair.strands.length; i++) {
     const strand = hair.strands[i];
     const def = strand.rootDef;
     if (!def || def.u == null) continue;
-    const [nx, ny] = localToNorm(pose, def.u, def.v);
+
+    let u = def.u;
+    let v = def.v;
+    const arc = correctedArcs?.get(def.fin);
+    if (arc) [u, v] = alongArc(arc, def.t);
+
+    const [nx, ny] = localToNorm(pose, u, v);
     const { x, y } = normToScreen(nx, ny, cover, IDENTITY);
 
     const ps = strand.particles;
@@ -250,10 +378,28 @@ export function updateFinRoots(hair, pose, buildPose, cover) {
     root.oldPos.set(x, y);
     root.rest.set(x, y);
 
+    const rot = flapRot?.get(def.fin);
+    const ca2 = rot ? rot[0] : ca;
+    const sa2 = rot ? rot[1] : sa;
+    // `pinDepth` (fraction of the ray, from the root) glues particles to the
+    // tracked pose exactly, the same way the root itself is teleported above
+    // — not held by bendReturn's spring, which still lets a fast target like
+    // `flap` fall behind. This is "where the real fin ends": inside it the
+    // curtain should track the actual fin with no lag or give, same as the
+    // root; past it, ordinary physics (swell, bendReturn, gravity) takes over
+    // same as any other strand.
+    const pinDepth = def.pinDepth ?? 0;
     for (let j = 1; j < ps.length; j++) {
-      const ox = ps[j].restOffset.x * k;
-      const oy = ps[j].restOffset.y * k;
-      ps[j].rest.set(x + (ox * ca - oy * sa), y + (ox * sa + oy * ca));
+      const p = ps[j];
+      const ox = p.restOffset.x * k;
+      const oy = p.restOffset.y * k;
+      const rx = x + (ox * ca2 - oy * sa2);
+      const ry = y + (ox * sa2 + oy * ca2);
+      p.rest.set(rx, ry);
+      if (p.depth <= pinDepth) {
+        p.pos.set(rx, ry);
+        p.oldPos.set(rx, ry);
+      }
     }
 
     if (hair.rootScreen[i]) {

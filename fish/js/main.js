@@ -2,9 +2,11 @@
 //  FISH — bootstrap, the render loop, diagnostics.
 //
 //  Closest to horse/ of the three pieces, because there is a video and therefore
-//  time: the roots ride a tracked body every frame. Simpler than horse/ in one
-//  respect — the pose is generated, not hand-keyed, so there is no tracking
-//  editor, no store, and no export path. See bodyTrack.js for why that is enough.
+//  time: the roots ride a tracked body every frame. The pose is GENERATED, not
+//  hand-keyed (see bodyTrack.js) — but generated tracking still drifts on
+//  particular frames, so there is a tracking editor after all: not horse's
+//  "author the whole clip by hand" one, a sparse patch on top of the auto
+//  track instead. See trackCorrectionStore.js.
 //
 //  The clock is `video.currentTime`, never an accumulated wall clock. The swell
 //  is periodic over CONFIG.windPeriod = 2.5 s = the clip's exact duration, so
@@ -16,13 +18,23 @@ import { CONFIG } from "./config.js";
 import { computeCover } from "../../shared/js/cover.js";
 import { HairSystem } from "../../shared/js/hairSystem.js";
 import { attachPointer, decayPointer } from "../../shared/js/pointer.js";
-import { BodyTrack } from "./bodyTrack.js";
+import { notifyPointerHit } from "../../shared/js/interactionSound.js";
+import { BodyTrack, boomerangTime, boomerangHalf } from "./bodyTrack.js";
 import { BodyCollider } from "./bodyCollider.js";
 import { buildFinRoots, updateFinRoots, assignSwellPhases, FINS } from "./fins.js";
+import { FinAnchorStore } from "./finAnchorStore.js";
+import { FinAnchorFrameStore } from "./finAnchorFrameStore.js";
+import { FinAnchorEditor } from "./finAnchorEditor.js";
+import { TrackCorrectionStore, poseAt as correctedPoseAt } from "./trackCorrectionStore.js";
+import { TrackCorrectionEditor } from "./trackCorrectionEditor.js";
 import { stageReady, onStage } from "../../shared/js/stage.js";
 
 const IDENTITY = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
 const BUILD = "2026-08-11 · fish, code fins driven by swell";
+
+const isTypingTarget = (el) =>
+  !!el &&
+  (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
 
 const params = new URLSearchParams(location.search);
 const videoEl = document.getElementById("bg");
@@ -35,7 +47,30 @@ let cover = null;
 let hair = null;
 let track = null;
 let buildPose = null;
+let finAnchorStore = null;
+let finAnchorFrameStore = null;
+let finAnchorEditor = null;
+let trackCorrectionStore = null;
+let trackCorrectionEditor = null;
+// Whip damper state — which raw-file half we were in last frame, and how many
+// more frames the extra brake still has to run. See CONFIG.whipDamper.
+let lastBoomerangHalf = null;
+let whipDamperFramesLeft = 0;
 const collider = new BodyCollider();
+
+// The pose everything actually renders with: the raw tracked pose plus
+// whatever trackCorrectionStore has at this frame (zero almost everywhere).
+// Every other call site should go through this, not track.poseAt directly —
+// see trackCorrectionStore.js for why the two can drift apart otherwise.
+//
+// `time` is folded through boomerangTime first: the video FILE plays forward
+// then reversed (fish-loop-boomerang.mp4, ~4.92s), but fish-tracking.json and
+// every hand-placed correction are keyed to the original 60-frame / 2.5s pass
+// — see the comment on boomerangTime in bodyTrack.js.
+function poseNow(time) {
+  const t = boomerangTime(time, CONFIG.video.duration, CONFIG.video.fps);
+  return trackCorrectionStore ? correctedPoseAt(track, trackCorrectionStore, t) : track.poseAt(t);
+}
 
 let diag = params.has("diag");
 // The live parameter panel (shared/js/controls.js). It does not suppress the letters —
@@ -71,11 +106,76 @@ function computeCurrentCover() {
   return cover;
 }
 
+// ---------------------------------------------------------------------------
+//  PAUSE + FRAME STEP — for working against one still frame (e.g. lining up
+//  fin anchors), same pattern as horse/js/main.js's video calibration keys.
+// ---------------------------------------------------------------------------
+
+// track.frames.length is the authoritative frame count (fish-tracking.json is
+// built for the exact clip in play), CONFIG.video.duration*fps is only a
+// fallback for the moment before tracking has loaded.
+const frameCount = () => (track ? track.frames.length : Math.round(CONFIG.video.duration * CONFIG.video.fps));
+
+// Folded through boomerangTime first, same reason as poseNow: `mediaTime` can
+// be a raw position over the doubled boomerang file, and the frame it names is
+// always one of the original 60.
+function frameIndexAt(mediaTime) {
+  const t = boomerangTime(mediaTime, CONFIG.video.duration, CONFIG.video.fps);
+  return Math.min(frameCount() - 1, Math.max(0, Math.round(t * CONFIG.video.fps)));
+}
+
+// The inverse is simpler: a frame's forward-pass time is always inside
+// [0, loopDuration], which boomerangTime leaves untouched — no folding needed
+// on the way out, only on the way in.
+function timeOfFrame(frame) {
+  const f = Math.min(frameCount() - 1, Math.max(0, frame));
+  return f / CONFIG.video.fps;
+}
+
+function seekToFrame(frame) {
+  videoEl.pause();
+  paused = true;
+  videoEl.currentTime = timeOfFrame(frame);
+}
+
+function seekBySeconds(delta) {
+  seekToFrame(frameIndexAt(videoEl.currentTime + delta));
+}
+
+const currentFrame = () => frameIndexAt(videoEl.currentTime);
+
+function pauseVideo() {
+  videoEl.pause();
+  paused = true;
+  syncToFrame();
+}
+
+function playVideo() {
+  videoEl.play();
+  paused = false;
+  lastPerf = performance.now();
+}
+
+// While paused nothing in loop() runs (see the paused/stageHidden check), so a
+// seek needs its own redraw: move the pinned roots onto the new pose and
+// repaint, without touching hair.update — the rest of each strand keeps
+// whatever shape the physics last settled into, only the roots (and hence the
+// anchor editor's dots) land exactly on the frame you stepped to.
+function syncToFrame() {
+  if (hair && track) {
+    const time = boomerangTime(videoEl.currentTime || 0, CONFIG.video.duration, CONFIG.video.fps);
+    const pose = poseNow(time); // idempotent re-fold, harmless
+    collider.setPose(pose, cover);
+    updateFinRoots(hair, pose, buildPose, cover, finAnchorFrameStore, track.frameAt(time));
+  }
+  render();
+}
+
 // Strands are built ONCE, against the pose at t=0, and thereafter only their
 // roots move (updateFinRoots). Rebuilding per frame would throw away the inertia
 // that makes a fin trail — the whole point of the piece.
 function rebuild() {
-  buildPose = track.buildPose;
+  buildPose = poseNow(0);
   const roots = buildFinRoots(buildPose, cover);
   collider.setPose(buildPose, cover);
   hair = new HairSystem({ roots, collision: collider, bgImage: null });
@@ -88,6 +188,8 @@ function render() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   glyphsDrawn = hair && CONFIG.systems.renderHair ? hair.draw(ctx, dpr) : 0;
   if (diag) hair?.drawDebug?.(ctx, dpr);
+  finAnchorEditor?.draw(ctx, dpr);
+  trackCorrectionEditor?.draw(ctx, dpr);
 
   framesRendered++;
   // "no letters" and "letters too faint" look identical from the outside, so the
@@ -98,13 +200,14 @@ function render() {
 }
 
 function drawDiagnostics() {
-  const pose = track ? track.poseAt(videoEl.currentTime || 0) : null;
+  const pose = track ? poseNow(videoEl.currentTime || 0) : null;
   const perFin = FINS.map((f) => `${f.name}=${f.count}`).join(" ");
   const lines = [
     `FISH DIAGNOSTICS   ${BUILD}`,
     ``,
     `video           ${CONFIG.video.src}  ${videoEl.videoWidth}x${videoEl.videoHeight}`,
-    `                readyState=${videoEl.readyState} paused=${videoEl.paused} t=${(videoEl.currentTime || 0).toFixed(2)}s`,
+    `                readyState=${videoEl.readyState} paused=${videoEl.paused} t=${(videoEl.currentTime || 0).toFixed(2)}s ` +
+      `frame=${track ? currentFrame() : "—"}/${track ? frameCount() - 1 : "—"}`,
     `tracking        ${trackStatus}`,
     `pose            ${pose ? `c=(${pose.cx.toFixed(3)}, ${pose.cy.toFixed(3)}) ang=${pose.angle.toFixed(2)}°` : "—"}`,
     `dpr             ${dpr}   viewport ${window.innerWidth}x${window.innerHeight}`,
@@ -125,6 +228,9 @@ function drawDiagnostics() {
     `loop error      ${loopError || "none"}`,
     ``,
     `press d to hide · ?diag to show`,
+    `press e for the fin anchor editor · ?anchors to open it directly`,
+    `press r for the tracking correction editor · ?track to open it directly`,
+    `space play/pause   ← → ±${CONFIG.seekCoarse}s   , . ±1 frame`,
   ];
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -202,16 +308,33 @@ function loop(now) {
     const dt = Math.min((now - lastPerf) / 16.6667, 2.2) || 1;
     lastPerf = now;
     // The video's own clock, so the wave can never drift out of phase with the
-    // footage however long the page is left open.
-    const loopTime = videoEl.currentTime || 0;
+    // footage however long the page is left open. Folded through boomerangTime:
+    // the FILE runs ~4.92s (forward + reversed) for smooth native playback, but
+    // the swell — like the tracking — is periodic over the original 2.5s pass,
+    // and a triangle wave played backward over exactly one period is already
+    // continuous, so nothing about the wave needed retuning for this.
+    const loopTime = boomerangTime(videoEl.currentTime || 0, CONFIG.video.duration, CONFIG.video.fps);
+
+    // Catch the exact frame the body's own velocity reverses (see
+    // boomerangHalf / CONFIG.whipDamper) and hold extra drag for a few frames
+    // from there — the shock gets absorbed on the spot instead of ringing
+    // through the strands as a whip.
+    const half = boomerangHalf(videoEl.currentTime || 0, CONFIG.video.duration, CONFIG.video.fps);
+    if (lastBoomerangHalf !== null && half !== lastBoomerangHalf) {
+      whipDamperFramesLeft = CONFIG.whipDamper.frames;
+    }
+    lastBoomerangHalf = half;
+    const dampingBoost = whipDamperFramesLeft > 0 ? CONFIG.whipDamper.factor : 1;
+    if (whipDamperFramesLeft > 0) whipDamperFramesLeft--;
 
     if (hair && track) {
-      const pose = track.poseAt(loopTime);
+      const pose = poseNow(loopTime); // idempotent re-fold, harmless
       // Before update(), so the solver collides against where the body IS this
       // frame and not where it was last one.
       collider.setPose(pose, cover);
-      updateFinRoots(hair, pose, buildPose, cover);
-      hair.update(dt, loopTime);
+      updateFinRoots(hair, pose, buildPose, cover, finAnchorFrameStore, track.frameAt(loopTime));
+      hair.update(dt, loopTime, dampingBoost);
+      notifyPointerHit(hair.pointerHit);
     }
     decayPointer(CONFIG.pointer.decay);
     render();
@@ -282,6 +405,23 @@ async function init() {
     return;
   }
 
+  // Applied to FINS in place before the first build, so a saved edit is what
+  // gets built rather than something rebuild() has to notice later.
+  finAnchorStore = new FinAnchorStore();
+  console.info(`Fin anchors: ${await finAnchorStore.init()}`);
+
+  // Read by updateFinRoots() every frame, same as trackCorrectionStore below —
+  // no rebuild involved, so it doesn't need to exist before rebuild() the way
+  // finAnchorStore does.
+  finAnchorFrameStore = new FinAnchorFrameStore();
+  console.info(`Fin anchor frame corrections: ${await finAnchorFrameStore.init()}`);
+
+  // Read by poseNow() on every pose lookup from here on, including the
+  // rebuild() right below — so a correction at frame 0 is picked up by
+  // buildPose too, not just by playback.
+  trackCorrectionStore = new TrackCorrectionStore();
+  console.info(`Track corrections: ${await trackCorrectionStore.init()}`);
+
   rebuild();
   settle(CONFIG.reduceMotionSettleSteps);
   // Paint HERE, not in the loop's first frame. Inside the shell the piece is
@@ -289,12 +429,60 @@ async function init() {
   // arriving without fins and growing them a moment later.
   render();
 
+  finAnchorEditor = new FinAnchorEditor({
+    canvas,
+    store: finAnchorStore,
+    frameStore: finAnchorFrameStore,
+    getCover: () => cover,
+    getPose: () => poseNow(videoEl.currentTime || 0),
+    getFrame: currentFrame,
+    isPaused: () => videoEl.paused,
+    pause: pauseVideo,
+    // Global mode: moving a root changes what a whole fan is built from — same
+    // cost as an "apply: rebuild" CONTROL_SPEC param, so it rides the same
+    // coalesced flag. Frame mode: read live every frame by updateFinRoots, so
+    // it only needs a repaint while paused.
+    onChangeGlobal: () => {
+      controlsRebuild = true;
+    },
+    onChangeFrame: () => {
+      if (videoEl.paused) syncToFrame();
+    },
+    requestRedraw: render,
+  });
+  trackCorrectionEditor = new TrackCorrectionEditor({
+    canvas,
+    store: trackCorrectionStore,
+    track,
+    getCover: () => cover,
+    // Folded through boomerangTime — this editor reads track.poseAt(time)
+    // directly (for the dashed "raw tracking" ring), bypassing poseNow, so it
+    // has to fold for itself. Everything downstream of this call is already in
+    // the tracked loop's own 60-frame domain and needs no further change.
+    getTime: () => boomerangTime(videoEl.currentTime || 0, CONFIG.video.duration, CONFIG.video.fps),
+    getFrame: currentFrame,
+    isPaused: () => videoEl.paused,
+    pause: pauseVideo,
+    // A pose correction is read live every frame (poseNow), unlike a fin arc
+    // edit — no rebuild needed, just a repaint while paused.
+    onChange: () => {
+      if (videoEl.paused) syncToFrame();
+    },
+    requestRedraw: render,
+  });
+  // Only one of the two owns canvas pointer capture at a time.
+  finAnchorEditor.exclusiveWith = trackCorrectionEditor;
+  trackCorrectionEditor.exclusiveWith = finAnchorEditor;
+
+  if (params.has("anchors")) finAnchorEditor.activate();
+  else if (params.has("track")) trackCorrectionEditor.activate();
+
   window.__fish = {
     cfg: CONFIG, // live, so swell values can be tried from the console
     getHair: () => hair,
     getTrack: () => track,
     getCover: () => cover,
-    getPose: () => track.poseAt(videoEl.currentTime || 0),
+    getPose: () => poseNow(videoEl.currentTime || 0),
     rebuild,
   };
 
@@ -304,7 +492,9 @@ async function init() {
   if (controlsWanted) startControls();
   window.addEventListener("resize", onResize);
   document.addEventListener("visibilitychange", () => {
-    paused = document.hidden;
+    // OR'd with the video's own state: coming back to a visible tab must not
+    // silently resume the sim out from under a manual pause left for editing.
+    paused = document.hidden || videoEl.paused;
     lastPerf = performance.now();
   });
   // Parked inside the shell: rAF stops on its own (display:none), but the clip
@@ -323,12 +513,34 @@ async function init() {
       videoEl.pause();
     },
   });
+  // Redraws on every seek while paused — see syncToFrame(). Fires whether the
+  // seek came from a key (seekToFrame) or from scrubbing the element directly.
+  videoEl.addEventListener("seeked", () => {
+    if (paused) syncToFrame();
+  });
+
   window.addEventListener("keydown", (e) => {
-    if (e.key.toLowerCase() === CONFIG.keys.diagnostics) {
+    if (isTypingTarget(e.target)) return;
+    if (finAnchorEditor?.handleKey(e, CONFIG.keys.finAnchors)) return;
+    if (trackCorrectionEditor?.handleKey(e, CONFIG.keys.trackFix)) return;
+    const K = CONFIG.keys;
+    const k = e.key.toLowerCase();
+
+    if (k === K.diagnostics) {
       diag = !diag;
       framesRendered = 0;
       render();
+      return;
     }
+    if (k === K.playPause) {
+      e.preventDefault(); // space would otherwise scroll the page
+      videoEl.paused ? playVideo() : pauseVideo();
+      return;
+    }
+    if (k === K.seekBack) return seekBySeconds(-CONFIG.seekCoarse);
+    if (k === K.seekForward) return seekBySeconds(CONFIG.seekCoarse);
+    if (k === K.frameBack) return seekToFrame(currentFrame() - 1);
+    if (k === K.frameForward) return seekToFrame(currentFrame() + 1);
   });
 
   // Autoplay can still be refused even muted. Say so instead of showing a black
