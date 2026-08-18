@@ -70,6 +70,11 @@ export const CONTROL_SPEC = {
     bendReturn: { path: "bendReturn", range: [0, 0.06], apply: "live" },
     bendReturnCurve: { path: "bendReturnCurve", range: [1, 4], apply: "live" },
     rootStiffness: { path: "rootStiffness", range: [1, 10], step: 1, apply: "live" },
+    // The pectoral's own, separate from the shared one above — how far the
+    // handoff from its (now hand-tracked) root to free physics reaches before
+    // the fin lets go. "rebuild" because it's baked into the root at build
+    // time, like collisionFromDepth/pinDepth just above it in fins.js.
+    pectoralRootStiffness: { path: "pectoralRootStiffness", range: [1, 26], step: 1, apply: "rebuild" },
     // Curvature resistance along the WHOLE strand — the ceiling-raiser for
     // "more rigid" once rootStiffness (root-only) is already maxed at 10.
     bendStiffness: { path: "systems.bendStiffness", apply: "live" },

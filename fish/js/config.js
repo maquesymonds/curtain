@@ -263,6 +263,15 @@ export const CONFIG = configure({
   damping: 0.76,
   iterations: 14,
   rootStiffness: 10,
+  // The pectoral's OWN rootStiffness (fins.js reads this for it specifically,
+  // separate from raiz.rootStiffness above) — its rays are shorter than the
+  // other fins', and now that the root is being dragged frame-by-frame to
+  // trail the real fin's edge (?anchors, frame mode), the handoff to free
+  // physics needs to reach further than 10 particles or the join between
+  // tracked motion and the wavy free part reads as a hard kink. No cap at 10
+  // the way the shared control has — go as high as the ray's own particle
+  // count before it stops mattering. Starting point, not measured.
+  pectoralRootStiffness: 26, // via ?controls, top of its range (was 18)
   // Measured: at 0.17 with a 46px reach the rays of a fan welded into one solid
   // sheet — the fin moved as a paddle and the gaps between rays closed, which is
   // what turned the caudal into a butterfly wing. A fin membrane is held by its
@@ -271,10 +280,10 @@ export const CONFIG = configure({
   // just enough to couple a ray to the two either side of it — beyond ~34px it
   // starts welding the fan into the solid paddle that was measured before.
   //
-  // cohesion 0.02 / cohesionMaxDist 9.5 — still under the 32/34px "welds into
-  // a paddle" reference. These two are a STABILISER: they hold whatever
+  // cohesion 0.045 / cohesionMaxDist 9.5 — still under the 32/34px "welds
+  // into a paddle" reference. These two are a STABILISER: they hold whatever
   // spacing the fan was BUILT at, they don't pull it anywhere on their own.
-  cohesion: 0.02,
+  cohesion: 0.045, // via ?controls, was 0.02
   cohesionMaxDist: 9.5,
   cohesionClump: 0.535, // back up from 0
   // Back to 0 via ?controls — the fan-closing mechanism, off again.
@@ -363,7 +372,7 @@ export const CONFIG = configure({
     envelope: 0.85,
     // Raised with it: the force has to beat the length constraints to bend the
     // chain, and below ~0.2 the solver wins and every fin moves as one piece.
-    strength: 0.21, // via ?controls, was 0.22 — negligible change
+    strength: 0.325, // via ?controls, was 0.21
     drift: 0, // off again via ?controls (was 0.062)
     scale: 0.0028,
     // Phase offsets, applied in fins.js. The four fins share the beat but not the
@@ -391,7 +400,9 @@ export const CONFIG = configure({
     blur: 7.95,
     alpha: 0.02,
     color: "#ff4a00", // the halo colour, so the spill on the scales matches the glow
-    ground: 0, // no "below": light spills evenly in water, not downward
+    // Was 0 ("no 'below': light spills evenly in water, not downward") — via
+    // ?controls, a small downward spill is back. Small (0.07), not a big deal.
+    ground: 0.07,
     groundOffset: 0,
   },
 

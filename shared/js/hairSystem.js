@@ -601,7 +601,11 @@ export class HairSystem {
     const k = CONFIG.bendReturn;
     const curve = CONFIG.bendReturnCurve;
     for (const s of this.strands) {
-      const n = Math.min(CONFIG.rootStiffness, s.particles.length - 1);
+      // A root can carry its OWN rootStiffness (rootDef, set at build time —
+      // see fins.js's pectoral), for a fin whose transition from tracked
+      // motion to free physics needs to reach further than the piece's
+      // general strands do. Falls back to the shared value for everyone else.
+      const n = Math.min(s.rootDef?.rootStiffness ?? CONFIG.rootStiffness, s.particles.length - 1);
       for (let i = 1; i <= n; i++) {
         const p = s.particles[i];
         const f = 1 - i / (n + 1); // 1 at the root, 0 past the last stiff particle

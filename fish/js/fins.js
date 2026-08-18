@@ -136,14 +136,14 @@ export const FINS = [
     // and collision exists specifically because pectoral/anal rays got pushed
     // through the belly without it. Starting point, not measured.
     collisionFromDepth: 0.45,
-    // GLUED, not just held — the fraction of the ray (from the root) that
-    // tracks the real fin's tracked position and angle EXACTLY, no bendReturn
-    // spring, no lag, the same way the single root particle already does.
-    // Past this depth the curtain lets go and is ordinary physics. Rough
-    // starting value for "about where the real fin ends" — the honest way to
-    // pin it down is to watch the reference and see where the curtain stops
-    // matching it.
-    pinDepth: 0.4,
+    // Was 0.4 — glued that fraction of every ray to the tracked position with
+    // no physics, to fake "the curtain follows the fin" back when only the
+    // single root particle was tracked. Not needed anymore: the anchor-point
+    // dragging (?anchors, frame mode, fish-fin-anchor-frames.json) now moves
+    // the ROOT itself to trail the real fin's edge, so only the root needs to
+    // be exact — everything past it should be loose and answer to the water
+    // like any other fin. Back to 0 (off).
+    pinDepth: 0,
     // THE REAL FIN'S OWN BEAT — not swell. Unlike the other four fins, the
     // reference pectoral does not just get bent by the water: it sweeps on
     // its own, faster than the body's 2.5s cycle — about three beats per
@@ -305,6 +305,14 @@ export function buildFinRoots(pose, cover) {
         // Read directly above in updateFinRoots — undefined (0) for every fin
         // but pectoral.
         pinDepth: fin.pinDepth,
+        // Per-fin override, read by hairSystem.js's _bendReturn(); undefined
+        // for every fin but pectoral, which reads CONFIG.pectoralRootStiffness
+        // — its own live slider, separate from the shared raiz.rootStiffness.
+        // The handoff from the tracked root to free physics needs to reach
+        // further on this fin than on the other four, now that the root
+        // itself is being dragged to trail the real fin's edge (?anchors,
+        // frame mode) — otherwise that transition reads as a sharp kink.
+        rootStiffness: fin.name === "pectoral" ? CONFIG.pectoralRootStiffness : undefined,
       });
       index++;
     }
