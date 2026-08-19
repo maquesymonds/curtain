@@ -99,17 +99,19 @@ export const CONTROL_SPEC = {
   },
 
   // ----- the holdout circle: where the letters are behind something --------
-  // Phase 1 is one static circle, so these move it and size it while you watch. `enabled` is
-  // off in config.js on purpose — turn it on here first, park the circle on the ear at the
-  // frame where the pile-up is worst (around 67-72), and see whether the mechanism convinces
-  // you before the keyframed version gets built. All normalized [0..1] on the video, `r` and
-  // `feather` as fractions of its WIDTH.
+  // Phase 2 (2026-08-19) is the keyframed track authored in horse/js/holdoutEditor.js
+  // ("H", or ?holdoutEditor) — when horse-holdout.json loads, THAT drives the zone's
+  // position and size, and x/y/radio below do nothing (they only reach the fallback
+  // CONFIG.holdout.zones, used when no track has been exported). `enabled` and `borde`
+  // still apply either way: `enabled` is the one global on/off switch, and `borde` is
+  // the feather RATIO (fraction of each zone's own r, not of the video width — see
+  // featherRatio's comment in config.js) shared by every zone.
   tapar: {
     enabled: { path: "holdout.enabled", apply: "live" },
     x: { path: "holdout.zones.0.nx", range: [0, 1], apply: "live" },
     y: { path: "holdout.zones.0.ny", range: [0, 1], apply: "live" },
     radio: { path: "holdout.zones.0.r", range: [0, 0.3], apply: "live" },
-    borde: { path: "holdout.zones.0.feather", range: [0, 0.12], apply: "live" },
+    borde: { path: "holdout.featherRatio", range: [0, 0.9], apply: "live" },
   },
 
   // ----- the forelock, and the parting it implies ---------------------------

@@ -685,24 +685,86 @@ configure({
   // an ear is hidden by the ear, and a soft-edged circle over one reads as exactly that
   // instead of as a bald patch.
   //
-  // COORDINATES ARE NORMALIZED [0..1] ON THE VIDEO, not screen px, and `r`/`feather` are
-  // fractions of the video WIDTH so a zone stays circular and keeps its size relative to the
-  // horse through any resize. Same space and same reason as the tracking.
+  // WHOLE STRANDS, not individual glyphs (2026-08-19). The test is against each strand's
+  // ROOT (shared/js/hairSystem.js's _holdoutAt, called once per strand at particles[0], not
+  // once per character) — a zone over the ear hides the anchor point and the whole strip of
+  // code hanging from it as one piece. It used to test every glyph's own position instead,
+  // which cut a strand into a visible-hidden-visible sandwich as it crossed the zone: the
+  // segment overlapping the ear vanished but the rest of the same strand stayed lit above
+  // and below it, which read as the ear slicing the hair rather than the hair growing from
+  // behind it.
   //
-  // Phase 1: static. The head moves, so a fixed circle can only ever be right for part of the
-  // clip — the keyframed version is the next step, and this exists first so the mechanism can
-  // be judged before that gets built. Drag it live in ?controls, group `tapar`.
+  // COORDINATES ARE NORMALIZED [0..1] ON THE VIDEO, not screen px, and `r` is a fraction of
+  // the video WIDTH so a zone stays circular and keeps its size relative to the horse
+  // through any resize. `featherRatio` below is a fraction OF `r`, not of the width — see
+  // its own comment for why. Same space and same reason as the tracking.
+  //
+  // Phase 2 (2026-08-19): the keyframed track in horse-holdout.json, authored in
+  // ?holdoutEditor ("H"). Drag it live in ?controls, group `tapar`, too.
   holdout: {
-    enabled: false, // off by default: an unauthored circle in the wrong place is worse than none
+    // On (2026-08-19): horse-holdout.json now has a real 28-keyframe track covering the
+    // whole clip (authored in ?holdoutEditor, key "H"), not just the single guessed pose
+    // phase 1 shipped with. Was off while that track didn't exist yet.
+    enabled: true,
+    // Fraction OF EACH ZONE'S OWN `r`, not an absolute width fraction (2026-08-19, was
+    // `feather: 0.015` in video px — a fixed width). The static phase-1 zone was r 0.04
+    // with that fixed 0.015, a ratio of ~0.37: roughly a third of the radius soft, two
+    // thirds solid. Once real authoring in ?holdoutEditor started producing much smaller
+    // zones (r 0.02-0.03, to hug just the ear instead of guessing one big circle for the
+    // whole clip), that FIXED feather ate 50-70% of the radius instead of ~37% — most of
+    // every zone was the soft rim, so a strand had to land almost exactly on the center to
+    // fully vanish, and everything else only partially faded. Measured across 10 authored
+    // keyframes at 1280px viewport width: 0-3 strands (of 84) fully hidden per frame, 2-10
+    // more partially faded, the rest untouched — this is why. A RATIO keeps the same solid
+    // core proportion regardless of how big or small a zone gets dragged.
+    featherRatio: 0.375,
     zones: [
       // A HANDLE TO GRAB, not an authored value. Placed by converting the measured pile-up
       // back into normalized space: at frame 72 the glyphs falling outside the silhouette sat
       // in x 769-850, y 251-319 on a 1301px viewport, whose cover draws the clip 2090px wide —
       // so their centre is nx 0.57, ny 0.24. The radius is about one ear.
-      // It is only right for the frames around 70, because the head moves and a static circle
-      // cannot follow it. That is the whole argument for phase 2.
-      { nx: 0.57, ny: 0.24, r: 0.04, feather: 0.015 },
+      //
+      // Phase 1 was a single static circle, only right for the frames around 70. Phase 2
+      // (2026-08-19) is horse/js/holdoutEditor.js — press "H" (or ?holdoutEditor) to drag a
+      // keyframed circle that follows the ear across the whole clip, exported to
+      // horse-holdout.json. THIS entry is now only the fallback used when that file hasn't
+      // been exported yet, or fails to load — see CONFIG.holdoutSource below.
+      { nx: 0.57, ny: 0.24, r: 0.04 },
     ],
+  },
+
+  // ----- HOLDOUT SOURCE (what playback runs on) -----------------------------
+  // The file exported from the holdout editor (horse/js/holdoutEditor.js, key "H"). When it
+  // loads and validates, the "tapar" zone rides ITS keyframed track instead of the single
+  // static circle in CONFIG.holdout.zones above. Mirrors trackingSource below, one level down
+  // (a zone is a {nx,ny,r} trio, not a 14-point curve).
+  holdoutSource: {
+    url: "horse-holdout.json",
+    enabled: true, // false forces the static CONFIG.holdout.zones fallback
+  },
+
+  // ----- HOLDOUT EDITOR (?holdoutEditor, or the "h" key) --------------------
+  // Two draggable handles per zone (center + radius), keyframed per frame, smoothstep
+  // interpolation in between — same rule as trackEditor below, one component wider per
+  // point ({nx,ny,r} instead of [x,y]). See holdoutStore.js / holdoutEditor.js.
+  holdoutEditor: {
+    zoneCount: 1, // just the ear for now; the data model is an array if a second is ever needed
+    storageKey: "horse-holdout-tracking-v1",
+    exportFilename: "horse-holdout.json",
+    exportDecimals: 6,
+    hitRadius: 14,
+    pointRadius: 5,
+    selectedRadius: 7,
+    saveDebounceMs: 200,
+    hudWidth: 430,
+    colors: {
+      ring: "rgba(0, 200, 255, 0.85)",
+      ringInner: "rgba(0, 200, 255, 0.4)",
+      point: "#0f8",
+      pointStroke: "rgba(0, 0, 0, 0.55)",
+      selected: "#fff34d",
+      keyframePoint: "#ff2fae",
+    },
   },
 
   // ----- COLLISION / ROOT BAND (static mode) -------------------------------
@@ -785,6 +847,7 @@ configure({
     frameBack: ",",
     frameForward: ".",
     trackEditor: "e",
+    holdoutEditor: "h",
     controls: "t", // show/hide the ?controls panel. Free in all three pieces.
     addKeyframe: "k",
     deleteKeyframe: ["backspace", "delete"],

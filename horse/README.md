@@ -31,6 +31,27 @@ control points, the root spline, the collision primitives and the video time.
 Collision primitive sizes and the loop-settle strength are in `js/config.js`
 under `primitives` and `loopConverge`.
 
+### Editing the "tapar" holdout zone (video mode)
+
+The mane can be told it passes *behind* something — the ear, at the poses where the
+head turns to camera — so the letters stop piling up in front of it. That's the
+`holdout` circle in `js/config.js`, and it now has its own editor. The test is
+per-STRAND, at its anchor point: a zone over the ear hides that root and the whole
+strip hanging from it as one piece, not just the individual characters that happen
+to overlap the ear this frame (see `_holdoutAt` in `shared/js/hairSystem.js`).
+
+**Holdout editor:** open `?mode=video&holdoutEditor=1` (or press **H**). Unlike the
+track editor above, the mane keeps rendering while this is open — the point is
+watching the letters pile up on the ear while you park the circle on it. Drag the
+**center** dot to move the zone, drag the **edge** dot (to its right) to resize it.
+Same keyframe workflow as the track editor: add/delete/copy/close-loop, and
+**Export JSON** writes `horse-holdout.json`. Toggle the effect on/off live with the
+panel's "Toggle enabled" button, or the `?controls` panel's `tapar.enabled`.
+
+If `horse-holdout.json` hasn't been exported yet (or fails to load), the piece falls
+back to the single static circle authored in `CONFIG.holdout.zones` — right for one
+pose only, not the whole clip.
+
 ## How to run
 
 There is **no build step and no npm** — it's plain HTML + ES modules. Modules
@@ -56,16 +77,23 @@ horse/
   Caballo1.png          background photo
   mane-root-guide.png   green line: where mane roots are born
   horse-collision-mask.png  alpha silhouette of the solid body
+  horse-tracking.json    exported 14-point crest curve (js/trackingEditor.js)
+  horse-holdout.json     exported "tapar" zone track (js/holdoutEditor.js)
   js/
     config.js           ALL tuning values (start here)
     main.js             bootstrap, resize, requestAnimationFrame loop
     cover.js            object-fit:cover transform + mask/guide alignment
     imageSampler.js     root sampling + collision grid
-    strand.js           one strand = chain of particles + chars
-    particle.js         Verlet particle
-    hairSystem.js       physics step, glyph atlas, renderer, debug overlay
-    wind.js             procedural idle wind field
-    vec2.js / utils.js  small helpers
+    trackingEditor.js / trackingStore.js / trackingSource.js
+                         the 14-point crest curve editor, its data, its playback
+    holdoutEditor.js / holdoutStore.js
+                         the "tapar" zone editor and its keyframe data
+    silhouette.js        per-frame read of where the horse actually is
+    strand.js            one strand = chain of particles + chars
+    particle.js          Verlet particle
+    hairSystem.js         physics step, glyph atlas, renderer, debug overlay
+    wind.js              procedural idle wind field
+    vec2.js / utils.js   small helpers
 ```
 
 ## Config values you'll tweak most (`js/config.js`)

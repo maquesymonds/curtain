@@ -787,9 +787,13 @@ export class HairSystem {
   // blobs at quarter scale costs almost nothing, and the upscale IS the blur, so
   // no filter is needed. Composited with "lighter" so it adds light rather than
   // painting over the picture.
-  // How much of a glyph at (x, y) survives the holdout zones: 1 outside all of them, 0 well
-  // inside one, feathered across the rim. Squared distances and an early exit, because the
-  // glyph pass calls this ~1150 times a frame — the sqrt is only paid inside the rim itself.
+  // How much of a STRAND survives the holdout zones: 1 outside all of them, 0 well inside
+  // one, feathered across the rim. Called once per strand, at its ROOT (particles[0], the
+  // anchor point updateRoots() pins to the crest every frame) — not once per glyph. A zone
+  // over the ear hides the anchor point and everything hanging from it as one piece, the
+  // way real hair growing from behind the ear is hidden whole, rather than fading out only
+  // the individual characters that happen to cross the zone this frame while the rest of
+  // the same strip stays lit above and below it (2026-08-19; was per-glyph before).
   //
   // SHARED WITH THE LIGHT WASH on purpose. The wash is a separate layer built from the same
   // particles, and masking the letters without masking their light leaves a glow with nothing
@@ -838,6 +842,11 @@ export class HairSystem {
     const depth = CONFIG.depth;
     const gain = cfg.intensity ?? 1;
     if (rebuild) for (const strand of this.strands) {
+      // Same strand-level decision the main draw uses (see _holdoutAt's comment): a
+      // strand hidden behind the ear throws no light either, or the wash would glow
+      // where there is visibly nothing casting it.
+      const hk = this._holdoutAt(strand.particles[0].pos.x, strand.particles[0].pos.y);
+      if (hk <= 0.004) continue;
       // Deep strands light the scene less, for the same reason they are drawn
       // dimmer: they are further from what they are lighting.
       const zk = depth.enabled ? 1 - Math.max(0, strand.z) * 0.6 : 1;
@@ -846,8 +855,6 @@ export class HairSystem {
         if (!p.char || p.char === " ") continue;
         // Brighter near the root, where the strands are packed together and the light
         // of many of them lands on the same place.
-        const hk = this._holdoutAt(p.pos.x, p.pos.y);
-        if (hk <= 0.004) continue;
         const rk = cfg.rootBoost ? 1 + cfg.rootBoost * (1 - p.depth) : 1;
         const a = cfg.alpha * zk * gain * rk * hk;
         g.globalAlpha = Math.min(1, a);
@@ -921,6 +928,10 @@ export class HairSystem {
       // it drops are glyphs it no longer pays for. See thinForelock() in horse/js/main.js.
       const drawGain = strand.drawGain ?? 1;
       if (drawGain <= 0.004) continue;
+      // Is this strand's anchor point behind something? Decided once, at the root, and
+      // applied to every glyph on the strand — see _holdoutAt.
+      const holdout = zones === null ? 1 : this._holdoutAt(strand.particles[0].pos.x, strand.particles[0].pos.y);
+      if (holdout <= 0.004) continue;
       const constantZ = !depth.enabled || strand.zTip === strand.z;
       // When z is constant along the strand the bucket is resolved once; when it
       // isn't, it has to be resolved PER CHARACTER, which is what lets a strand
@@ -929,10 +940,6 @@ export class HairSystem {
 
       for (const p of strand.particles) {
         if (!p.char || p.char === " ") continue;
-
-        // Is this glyph behind something? See _holdoutAt.
-        const holdout = zones === null ? 1 : this._holdoutAt(p.pos.x, p.pos.y);
-        if (holdout <= 0.004) continue;
         // The z ramp has to be shaped, not linear, for two reasons that pull in
         // opposite directions.
         //

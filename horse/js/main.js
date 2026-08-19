@@ -41,6 +41,8 @@ import {
 } from "./tracking.js";
 import { TrackingEditor } from "./trackingEditor.js";
 import { TrackingSource } from "./trackingSource.js";
+import { HoldoutEditor } from "./holdoutEditor.js";
+import { holdoutPoseFromKeyframes, parseHoldoutKeyframes } from "./holdoutStore.js";
 import { Silhouette } from "./silhouette.js";
 import { stageReady, onStage } from "../../shared/js/stage.js";
 import { ensureGlyphFont } from "../../shared/js/fonts.js";
@@ -76,6 +78,8 @@ let srcW = CONFIG.video.width;
 let srcH = CONFIG.video.height;
 let editor = null;
 let track = null; // TrackingSource — the edited 14-point curve, when available
+let holdoutEditor = null;
+let holdoutPoses = null; // resolved per-frame zones from horse-holdout.json, when available
 let silhouette = null; // per-frame read of where the horse actually is
 
 let debug = params.has("debug"); // static PNG collision overlay
@@ -84,6 +88,10 @@ let debug = params.has("debug"); // static PNG collision overlay
 const IS_VIDEO = MODE === "video";
 let calibrate = params.has("calibrate") && IS_VIDEO;
 let editing = params.has("trackEditor") && IS_VIDEO;
+// NOT one of the "inspecting" tools below: the holdout editor deliberately leaves the
+// mane alive, because the point is watching the letters pile up on the ear while you
+// park the circle on it — see the note on inspecting() / HAIR_SUPPRESSED.
+let holdoutEditing = params.has("holdoutEditor") && IS_VIDEO;
 // The live parameter panel. Unlike the two tools above it does NOT suppress the mane —
 // the whole point is dragging values while the piece runs.
 const controlsWanted = params.has("controls") && IS_VIDEO;
@@ -113,8 +121,18 @@ let loopError = null;
 // serving a cached module and nothing you just changed is live.
 const BUILD = "2026-08-12 · crest band + flow + neon mane";
 
-// True while an inspection tool is open. The mane must neither simulate nor draw.
-const inspecting = () => calibrate || editing;
+// True while the READ-ONLY diagnostic overlay is open. The mane must neither
+// simulate nor draw there — it's a bare check of the legacy 5-point spline
+// against the footage, nothing else on screen.
+//
+// `editing` (the 14-point Track Editor) is NOT in here (2026-08-19, was
+// `calibrate || editing`). It used to suppress the mane the same way calibrate
+// does, which meant judging a track edit meant dragging a point blind, leaving
+// the editor, and looking — the same "no live preview" problem holdoutEditing
+// solves for the tapar zone (see its own note below). Now curveAt() reads the
+// editor's live, in-progress curve while it's open, so the real letters render
+// under the dots as you drag them.
+const inspecting = () => calibrate;
 
 // Whether the mane was suppressed at boot. If it was, `hair` is null for the
 // rest of the session and toggling a tool off simply leaves an empty stage —
@@ -194,6 +212,15 @@ function strandCountForViewport() {
 // spline. Roots, root markers and collision primitives all read from this, so
 // they can never disagree about where the crest is.
 function curveAt(mediaTime) {
+  // While the Track Editor is open, the mane follows what's ON SCREEN right now —
+  // the editor's own live, possibly-mid-drag keyframes — not the last exported
+  // horse-tracking.json. This is what makes dragging a point show real letters
+  // moving under it instead of a blind pair of dots. Closing the editor (or never
+  // opening it) falls straight through to the shipped track, unchanged.
+  if (editor && editor.active) {
+    const pose = editor.store.poseAt(frameIndexAt(mediaTime));
+    return (u) => catmullRomAt(pose, u);
+  }
   if (track) {
     // Resolve the pose once per call, then sample the curve through it.
     const pose = track.poseAtFrame(frameIndexAt(mediaTime));
@@ -563,6 +590,35 @@ function thinForelock(tbl) {
   }
 }
 
+// Fetch + validate horse-holdout.json and resolve it into one zones array per frame, the
+// same "load once, index by frame" shape TrackingSource.load() builds for the crest curve
+// — small enough here not to need its own class/file (see holdoutStore.js's header note).
+// Returns null (never throws) when the file is missing or invalid, so the caller falls
+// back to the static CONFIG.holdout.zones circle.
+async function loadHoldoutTrack(url) {
+  let res;
+  try {
+    res = await fetch(url, { cache: "no-cache" });
+  } catch (err) {
+    console.warn(`Holdout file ${url} could not be fetched (${err.message}).`);
+    return null;
+  }
+  if (!res.ok) {
+    console.warn(`Holdout file ${url} returned ${res.status}.`);
+    return null;
+  }
+  try {
+    const entries = parseHoldoutKeyframes(await res.json());
+    const keyframes = new Map(entries);
+    const poses = [];
+    for (let f = 0; f < CONFIG.video.frameCount; f++) poses.push(holdoutPoseFromKeyframes(keyframes, f));
+    return poses;
+  } catch (err) {
+    console.error(`Holdout file ${url} rejected: ${err.message}`);
+    return null;
+  }
+}
+
 // The holdout zones in SCREEN px, rebuilt whenever the cover changes or a slider moves.
 //
 // Normalized -> screen is a uniform scale (computeCover keeps the clip's aspect ratio), so one
@@ -572,14 +628,20 @@ function thinForelock(tbl) {
 //
 // The squared radii are precomputed here rather than in the draw loop because the draw loop
 // tests this once per GLYPH, and there are ~1150 of them a frame.
-function holdoutZones() {
+// Prefers the keyframed track loaded from horse-holdout.json (holdoutPoses) over the
+// single static CONFIG.holdout.zones circle — see holdoutEditor.js / holdoutStore.js.
+function holdoutZones(mediaTime) {
   const h = CONFIG.holdout;
   if (!h || !h.enabled || !cover) return null;
+  const zones = holdoutPoses ? holdoutPoses[frameIndexAt(mediaTime)] : h.zones;
+  const featherRatio = h.featherRatio ?? 0;
   const out = [];
-  for (const z of h.zones) {
+  for (const z of zones) {
     const p = normToScreen(z.nx, z.ny, cover, IDENTITY);
     const r = z.r * cover.drawW;
-    const inner = Math.max(0, r - (z.feather ?? 0) * cover.drawW);
+    // A fraction OF r, not of the width — see the note on featherRatio in config.js. Keeps
+    // the same solid-core proportion whether this zone is dragged small or large.
+    const inner = Math.max(0, r * (1 - featherRatio));
     out.push({ x: p.x, y: p.y, r, inner, r2: r * r, inner2: inner * inner });
   }
   return out;
@@ -595,7 +657,7 @@ function applyManeFrame(mediaTime) {
     hair.updateRoots(cover, maneCurveFrom(tbl));
     aimForelock(base);
     thinForelock(tbl);
-    hair.holdoutZones = holdoutZones();
+    hair.holdoutZones = holdoutZones(mediaTime);
   }
   return tbl;
 }
@@ -937,6 +999,18 @@ async function initVideo() {
     }
   }
 
+  // Same idea, one level down: the keyframed "tapar" zone, when it has been authored
+  // and exported from ?holdoutEditor. Missing or invalid file -> null -> the static
+  // CONFIG.holdout.zones fallback, exactly like the crest curve above.
+  if (CONFIG.holdoutSource.enabled) {
+    holdoutPoses = await loadHoldoutTrack(CONFIG.holdoutSource.url);
+    if (holdoutPoses) {
+      console.info(`Holdout: ${CONFIG.holdoutSource.url} loaded.`);
+    } else {
+      console.warn("Holdout: falling back to the static CONFIG.holdout.zones circle.");
+    }
+  }
+
   silhouette = new Silhouette(videoEl);
   silhouette.sample(0);
 
@@ -980,6 +1054,11 @@ async function initVideo() {
       config: CONFIG,
       frameIndexAt,
       seekToFrame,
+      // Forces roots/holdout/primitives to whatever mediaTime says, independent of the
+      // video element's own playhead — useful for measuring a specific frame's derived
+      // state (root positions, holdout coverage) from a tool that can't rely on the
+      // browser actually decoding and seeking the clip.
+      drawFrameAt,
       get frames() {
         return framesRendered;
       },
@@ -1050,6 +1129,23 @@ async function initVideo() {
     requestRedraw: () => drawFrameAt(videoEl.currentTime || 0),
   });
   if (editing) editor.activate();
+
+  holdoutEditor = new HoldoutEditor({
+    video: videoEl,
+    canvas,
+    getCover: () => cover,
+    getFrame: currentFrame,
+    seekToFrame,
+    requestRedraw: () => drawFrameAt(videoEl.currentTime || 0),
+  });
+  // Both editors take over the canvas's pointer events, so only one may be active at
+  // boot — if both flags were passed, the track editor (the older, more load-bearing
+  // tool) wins and the holdout flag is dropped with a console note.
+  if (holdoutEditing && editing) {
+    holdoutEditing = false;
+    console.warn("?trackEditor and ?holdoutEditor both requested at boot — opening only the track editor.");
+  }
+  if (holdoutEditing) holdoutEditor.activate();
 
   wireCommon(true);
 
@@ -1229,6 +1325,7 @@ function renderVideo(mediaTime) {
   if (hair && CONFIG.systems.renderHair) glyphsDrawn = hair.draw(ctx, dpr);
   if (calibrate) drawCalibration(mediaTime);
   if (editor) editor.draw(ctx, dpr, mediaTime);
+  if (holdoutEditor) holdoutEditor.draw(ctx, dpr, mediaTime);
 
   // A PAUSED CLIP LOOKS EXACTLY LIKE A BROKEN ONE. The solver runs on
   // requestVideoFrameCallback, so pausing the video stops the physics too and leaves a
@@ -1275,7 +1372,7 @@ function drawDiagnostics(mediaTime) {
   const lines = [
     `NEON MANE DIAGNOSTICS   ${BUILD}`,
     ``,
-    `mode            ${MODE}   calibrate=${calibrate} editor=${editing}`,
+    `mode            ${MODE}   calibrate=${calibrate} editor=${editing} holdoutEditor=${holdoutEditor?.active}`,
     `reduceMotion    ${reduceMotion}`,
     `dpr             ${dpr}   devicePixelRatio=${window.devicePixelRatio}`,
     `viewport        ${window.innerWidth}x${window.innerHeight}`,
@@ -1285,6 +1382,7 @@ function drawDiagnostics(mediaTime) {
     `video           ${videoEl.videoWidth}x${videoEl.videoHeight} ready=${videoEl.readyState}` +
       ` paused=${videoEl.paused} t=${videoEl.currentTime.toFixed(2)}`,
     `tracking file   ${track ? `${track.keyframeCount} keyframes` : "NOT LOADED (5-point fallback)"}`,
+    `holdout file    ${holdoutPoses ? "loaded" : "NOT LOADED (static zones fallback)"}`,
     ``,
     `hair            ${hair ? "built" : "NULL (suppressed)"}`,
     `strands         ${hair ? hair.strands.length : "—"}`,
@@ -1572,7 +1670,28 @@ function wireCommon(isVideo) {
     // The editor gets first refusal: it owns "e" plus its own shortcuts.
     if (isVideo && editor && editor.handleKey(e)) {
       editing = editor.active;
+      // Both editors take over the canvas's pointer events while open; leaving both on
+      // would have them fight over the same drags. holdoutEditor.deactivate() below
+      // resets pointerEvents to "", so if this editor is the one that should end up
+      // holding the canvas, that has to be re-asserted after.
+      if (editing && holdoutEditor?.active) {
+        holdoutEditor.deactivate();
+        if (editor.active) canvas.style.pointerEvents = "auto";
+      }
       applySystems();
+      if (videoEl.paused) drawFrameAt(videoEl.currentTime);
+      return;
+    }
+    // Same refusal, for "h" plus the holdout editor's own shortcuts. It does NOT go
+    // through applySystems()/HAIR_SUPPRESSED — see the note where holdoutEditing is
+    // declared — the mane keeps rendering underneath it.
+    if (isVideo && holdoutEditor && holdoutEditor.handleKey(e)) {
+      if (holdoutEditor.active && editor?.active) {
+        editor.deactivate();
+        editing = false; // keep this in sync with editor.active — see applySystems()/inspecting()
+        applySystems();
+        if (holdoutEditor.active) canvas.style.pointerEvents = "auto"; // deactivate() above cleared it
+      }
       if (videoEl.paused) drawFrameAt(videoEl.currentTime);
       return;
     }

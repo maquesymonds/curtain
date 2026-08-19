@@ -89,15 +89,46 @@ export class TrackingStore {
 
   // ----- lifecycle ---------------------------------------------------------
 
-  // Load the autosave if it is present AND valid; otherwise start fresh with a
-  // single keyframe at frame 0. Returns a short human-readable status string.
-  init() {
-    const loaded = this.loadFromStorage();
-    if (loaded.ok) return loaded.status;
+  // Three tiers, same order willow's AnchorStore.init() uses: the autosave (your
+  // actual in-progress work) first, then the shipped horse-tracking.json (so
+  // opening the editor with no autosave starts from the CURRENT working track
+  // instead of the bare 5-point seed — see the note on loadFromFile below), and
+  // only the seed if neither exists. Returns a short human-readable status string.
+  async init() {
+    const local = this.loadFromStorage();
+    if (local.ok) return local.status;
+
+    const file = await this.loadFromFile();
+    if (file.ok) return file.status;
 
     this.keyframes.clear();
     this.setKeyframe(0, seedPoints(), { save: true });
-    return loaded.status ? `${loaded.status} — started from the 5-point seed` : "new session, frame 0 seeded";
+    return [local.status, file.status].filter(Boolean).join(" · ") || "new session, frame 0 seeded";
+  }
+
+  // The committed file — the same one TrackingSource loads for playback. Used
+  // when there is no autosave, e.g. a fresh browser, or after clearing storage.
+  // Without this tier, editing meant re-tracking the WHOLE clip from a straight
+  // 5-point line every time, instead of nudging the track that already ships.
+  async loadFromFile() {
+    const url = CONFIG.trackingSource.url;
+    if (!url) return { ok: false, status: "" };
+    let res;
+    try {
+      res = await fetch(url, { cache: "no-cache" });
+    } catch (err) {
+      return { ok: false, status: "" }; // no file committed yet; not an error
+    }
+    if (!res.ok) return { ok: false, status: "" };
+    try {
+      const entries = parseKeyframes(await res.json(), { requirePointCount: N() });
+      this.replaceAll(entries);
+      this.saveState = "saved";
+      return { ok: true, status: `loaded ${entries.length} keyframe(s) from ${url}` };
+    } catch (err) {
+      console.error(`${url} rejected: ${err.message}`);
+      return { ok: false, status: `${url} rejected: ${err.message}` };
+    }
   }
 
   // ----- queries -----------------------------------------------------------
