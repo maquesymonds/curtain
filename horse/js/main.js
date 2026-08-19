@@ -563,6 +563,28 @@ function thinForelock(tbl) {
   }
 }
 
+// The holdout zones in SCREEN px, rebuilt whenever the cover changes or a slider moves.
+//
+// Normalized -> screen is a uniform scale (computeCover keeps the clip's aspect ratio), so one
+// number converts the radius: `cover.drawW`. That is also why `r` is authored as a fraction of
+// the WIDTH — scaling it by drawH instead would turn a circle into an ellipse on any viewport
+// whose aspect differs from the clip's.
+//
+// The squared radii are precomputed here rather than in the draw loop because the draw loop
+// tests this once per GLYPH, and there are ~1150 of them a frame.
+function holdoutZones() {
+  const h = CONFIG.holdout;
+  if (!h || !h.enabled || !cover) return null;
+  const out = [];
+  for (const z of h.zones) {
+    const p = normToScreen(z.nx, z.ny, cover, IDENTITY);
+    const r = z.r * cover.drawW;
+    const inner = Math.max(0, r - (z.feather ?? 0) * cover.drawW);
+    out.push({ x: p.x, y: p.y, r, inner, r2: r * r, inner2: inner * inner });
+  }
+  return out;
+}
+
 // The one call that puts the mane on the frame: roots on the band, forelock re-aimed.
 function applyManeFrame(mediaTime) {
   // One read of the frame, before anything asks where the horse is.
@@ -573,6 +595,7 @@ function applyManeFrame(mediaTime) {
     hair.updateRoots(cover, maneCurveFrom(tbl));
     aimForelock(base);
     thinForelock(tbl);
+    hair.holdoutZones = holdoutZones();
   }
   return tbl;
 }

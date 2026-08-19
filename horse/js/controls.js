@@ -98,6 +98,20 @@ export const CONTROL_SPEC = {
     feather: { path: "maneShape.forelockThin.feather", range: [0.02, 0.6], apply: "live" },
   },
 
+  // ----- the holdout circle: where the letters are behind something --------
+  // Phase 1 is one static circle, so these move it and size it while you watch. `enabled` is
+  // off in config.js on purpose — turn it on here first, park the circle on the ear at the
+  // frame where the pile-up is worst (around 67-72), and see whether the mechanism convinces
+  // you before the keyframed version gets built. All normalized [0..1] on the video, `r` and
+  // `feather` as fractions of its WIDTH.
+  tapar: {
+    enabled: { path: "holdout.enabled", apply: "live" },
+    x: { path: "holdout.zones.0.nx", range: [0, 1], apply: "live" },
+    y: { path: "holdout.zones.0.ny", range: [0, 1], apply: "live" },
+    radio: { path: "holdout.zones.0.r", range: [0, 0.3], apply: "live" },
+    borde: { path: "holdout.zones.0.feather", range: [0, 0.12], apply: "live" },
+  },
+
   // ----- the forelock, and the parting it implies ---------------------------
   // `untilU` is where the parting sits: everything in front of it falls toward the face.
   // Keep it above maneShape.rootURange.0 (0.055) or the zone collapses and the control

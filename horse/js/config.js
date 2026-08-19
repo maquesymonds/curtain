@@ -674,6 +674,37 @@ configure({
   // mode samples roots from the bright line inside this band.
   rootXRange: [0.305, 0.63],
 
+  // ----- HOLDOUT — WHERE THE LETTERS ARE BEHIND SOMETHING ------------------
+  //
+  // A matte, not a force. The letters that pile up over an ear are not there because the
+  // physics aimed them there — measured at length, and every force in the piece was ruled out
+  // one by one (see thinForelock() in main.js for the list). They are there because the crest
+  // passes behind the ear and nothing in the piece knows the ear is in FRONT. So this says so.
+  //
+  // Read as occlusion rather than as deletion, which is why it works on the eye: hair behind
+  // an ear is hidden by the ear, and a soft-edged circle over one reads as exactly that
+  // instead of as a bald patch.
+  //
+  // COORDINATES ARE NORMALIZED [0..1] ON THE VIDEO, not screen px, and `r`/`feather` are
+  // fractions of the video WIDTH so a zone stays circular and keeps its size relative to the
+  // horse through any resize. Same space and same reason as the tracking.
+  //
+  // Phase 1: static. The head moves, so a fixed circle can only ever be right for part of the
+  // clip — the keyframed version is the next step, and this exists first so the mechanism can
+  // be judged before that gets built. Drag it live in ?controls, group `tapar`.
+  holdout: {
+    enabled: false, // off by default: an unauthored circle in the wrong place is worse than none
+    zones: [
+      // A HANDLE TO GRAB, not an authored value. Placed by converting the measured pile-up
+      // back into normalized space: at frame 72 the glyphs falling outside the silhouette sat
+      // in x 769-850, y 251-319 on a 1301px viewport, whose cover draws the clip 2090px wide —
+      // so their centre is nx 0.57, ny 0.24. The radius is about one ear.
+      // It is only right for the frames around 70, because the head moves and a static circle
+      // cannot follow it. That is the whole argument for phase 2.
+      { nx: 0.57, ny: 0.24, r: 0.04, feather: 0.015 },
+    ],
+  },
+
   // ----- COLLISION / ROOT BAND (static mode) -------------------------------
   collisionCell: 7, // grid cell size in css px (smaller = finer, slower)
   // Covers the white line baked into the photo with a blurred strip of the photo

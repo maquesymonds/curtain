@@ -92,6 +92,18 @@ export class HairSystem {
     //   speed     cursor speed, 0..1, normalised against SPEED_FULL below.
     //   nx        cursor x across the viewport, 0..1, for stereo placement.
     this.contact = { hit: false, count: 0, weight: 0, u: 0.5, speed: 0, nx: 0.5 };
+
+    // HOLDOUT ZONES — screen-space circles where glyphs are not drawn.
+    //
+    // A matte, not a force: the point is not that hair cannot GO somewhere, it is that
+    // something is IN FRONT of it. On the horse that something is an ear, and hair behind an
+    // ear is hidden by the ear — so the honest fix for letters piling up over one is to say
+    // where the ear is, not to fight the physics into avoiding it.
+    //
+    // Set by the piece, in css px, as [{ x, y, r, inner, r2, inner2 }] — the squared radii are
+    // precomputed because this is tested per GLYPH, and `inner` is where the fade has finished
+    // so the edge is soft. null means no zones, which is what the other two pieces leave it as.
+    this.holdoutZones = null;
   }
 
   // (Re)build all strands for the current cover transform + dpr.
@@ -775,6 +787,31 @@ export class HairSystem {
   // blobs at quarter scale costs almost nothing, and the upscale IS the blur, so
   // no filter is needed. Composited with "lighter" so it adds light rather than
   // painting over the picture.
+  // How much of a glyph at (x, y) survives the holdout zones: 1 outside all of them, 0 well
+  // inside one, feathered across the rim. Squared distances and an early exit, because the
+  // glyph pass calls this ~1150 times a frame — the sqrt is only paid inside the rim itself.
+  //
+  // SHARED WITH THE LIGHT WASH on purpose. The wash is a separate layer built from the same
+  // particles, and masking the letters without masking their light leaves a glow with nothing
+  // making it — which reads as a bug rather than as an ear in front of the mane, and undoes
+  // the whole point of doing this as occlusion.
+  _holdoutAt(x, y) {
+    const zones = this.holdoutZones;
+    if (!zones || !zones.length) return 1;
+    let w = 1;
+    for (let i = 0; i < zones.length; i++) {
+      const z = zones[i];
+      const dx = x - z.x;
+      const dy = y - z.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 >= z.r2) continue; // outside this zone: no opinion
+      if (d2 <= z.inner2) return 0;
+      w *= smoothstep(z.inner, z.r, Math.sqrt(d2));
+      if (w <= 0.004) return 0;
+    }
+    return w;
+  }
+
   _drawLightWash(ctx, dpr) {
     const cfg = CONFIG.lightWash;
     if (!cfg || !cfg.enabled || !this.strands.length) return;
@@ -809,8 +846,10 @@ export class HairSystem {
         if (!p.char || p.char === " ") continue;
         // Brighter near the root, where the strands are packed together and the light
         // of many of them lands on the same place.
+        const hk = this._holdoutAt(p.pos.x, p.pos.y);
+        if (hk <= 0.004) continue;
         const rk = cfg.rootBoost ? 1 + cfg.rootBoost * (1 - p.depth) : 1;
-        const a = cfg.alpha * zk * gain * rk;
+        const a = cfg.alpha * zk * gain * rk * hk;
         g.globalAlpha = Math.min(1, a);
         g.beginPath();
         g.arc(p.pos.x * cfg.scale, p.pos.y * cfg.scale, r, 0, Math.PI * 2);
@@ -867,6 +906,7 @@ export class HairSystem {
     const lastBucket = this.atlases.length - 1;
     const rotate = CONFIG.glyphRotate;
     let drawn = 0;
+    const zones = this.holdoutZones && this.holdoutZones.length ? this.holdoutZones : null;
     // Set once for the whole upright batch; the fast path never touches it again.
     if (!rotate) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
@@ -889,6 +929,10 @@ export class HairSystem {
 
       for (const p of strand.particles) {
         if (!p.char || p.char === " ") continue;
+
+        // Is this glyph behind something? See _holdoutAt.
+        const holdout = zones === null ? 1 : this._holdoutAt(p.pos.x, p.pos.y);
+        if (holdout <= 0.004) continue;
         // The z ramp has to be shaped, not linear, for two reasons that pull in
         // opposite directions.
         //
@@ -916,7 +960,7 @@ export class HairSystem {
         if (!img) continue;
 
         const s = p.scale * zScale;
-        ctx.globalAlpha = p.alpha * lerp(1, 1 - CONFIG.tipFade, p.depth) * zAlpha * drawGain;
+        ctx.globalAlpha = p.alpha * lerp(1, 1 - CONFIG.tipFade, p.depth) * zAlpha * drawGain * holdout;
 
         if (!rotate) {
           // FAST PATH: glyphs stay upright. One transform is set for the whole
