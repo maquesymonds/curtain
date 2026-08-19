@@ -33,6 +33,8 @@
 //  The piece passes one `onApply(kinds)` and decides what those words mean for it.
 // ============================================================================
 
+import { getPath, setPath } from "./utils.js";
+
 const BUNDLE = "../../shared/vendor/theatre-core-and-studio.js";
 
 // Load the studio bundle once. It is a classic script that assigns window.Theatre,
@@ -55,20 +57,8 @@ function loadTheatre(url) {
 }
 
 // ---- CONFIG paths ---------------------------------------------------------
-// Dotted, with numeric segments for arrays: "gravity", "depth.haze.1",
-// "lengthRange.0", "maneShape.whorl.strength". Arrays are addressed by index on
-// purpose — it is how a [min, max] pair becomes two sliders without inventing a
-// parallel config shape for the panel's benefit.
-function getPath(obj, path) {
-  return path.split(".").reduce((o, k) => (o == null ? o : o[k]), obj);
-}
-
-function setPath(obj, path, value) {
-  const keys = path.split(".");
-  const last = keys.pop();
-  const target = keys.reduce((o, k) => o[k], obj);
-  target[last] = value;
-}
+// getPath/setPath live in utils.js: the visitor panel (tune.js) addresses CONFIG
+// the same way, and one notation for both is the point.
 
 // ---- colours -------------------------------------------------------------
 // Theatre's rgba prop is four 0..1 floats; the configs hold "#rrggbb" or

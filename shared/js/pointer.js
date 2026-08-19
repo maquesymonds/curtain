@@ -22,6 +22,17 @@ export const pointer = {
 let lastX = 0;
 let lastY = 0;
 let seen = false;
+// When the last pointermove arrived. `active` is not enough to tell whether the
+// cursor is MOVING: it is set true by the first move and only ever cleared by
+// pointerleave or blur, so a cursor parked in the curtain — or one whose piece
+// stopped receiving events because its iframe went pointer-events:none — reads
+// as active for as long as the page lives.
+let lastMoveAt = -Infinity;
+// A pointer that has not moved for this long is treated as still. Two frames at
+// 60 fps is too tight (a real hand produces gaps), 200 ms is long enough to hear
+// as a lag; 110 ms is under one perceptible beat and over any plausible gap
+// between two moves of a hand that is actually moving.
+const STILL_AFTER_MS = 110;
 
 export function attachPointer(target = window) {
   const onMove = (e) => {
@@ -39,6 +50,7 @@ export function attachPointer(target = window) {
     pointer.x = x;
     pointer.y = y;
     pointer.active = true;
+    lastMoveAt = performance.now();
   };
 
   target.addEventListener("pointermove", onMove, { passive: true });
@@ -56,4 +68,16 @@ export function attachPointer(target = window) {
 export function decayPointer(factor = 0.82) {
   pointer.vx *= factor;
   pointer.vy *= factor;
+}
+
+// Whether the cursor is moving RIGHT NOW, as opposed to having moved at some
+// point. Anything that should only happen while a hand is travelling through the
+// curtain — the sound, above all — has to ask this and not `pointer.active`.
+//
+// It is a timestamp comparison rather than a velocity threshold on purpose: the
+// velocity is decayed by the render loop, so it only reaches zero while frames
+// are being drawn. A piece whose loop is paused (a hidden iframe in the shell)
+// freezes its last velocity instead, and would come back still holding it.
+export function isPointerMoving() {
+  return performance.now() - lastMoveAt < STILL_AFTER_MS;
 }

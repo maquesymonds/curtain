@@ -9,7 +9,7 @@ import { Wind } from "./wind.js";
 import { Swell } from "./swell.js";
 import { normToScreen } from "./cover.js";
 import { sampleProfile, lerp, hash, smoothstep } from "./utils.js";
-import { pointer } from "./pointer.js";
+import { pointer, isPointerMoving } from "./pointer.js";
 
 const IDENTITY_ALIGN = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
 
@@ -73,6 +73,25 @@ export class HairSystem {
     // something (a sound, say) on real contact, not just on cursor movement
     // anywhere near the canvas. See shared/js/interactionSound.js.
     this.pointerHit = false;
+    // The same contact, MEASURED rather than reduced to a yes/no. A boolean is
+    // enough to start a sound and nothing more: brushing three glyphs and
+    // sweeping the whole curtain set it identically, so anything driven by it
+    // can only ever play at one intensity. These are the quantities a gesture
+    // actually has, and shared/js/interactionSound.js maps every one of them:
+    //
+    //   count     particles inside the radius. Raw, unweighted.
+    //   weight    sum of each hit particle's falloff × its along-strand depth,
+    //             i.e. how much curtain is really being displaced. This, not
+    //             `count`, is the honest "thickness" of the touch: forty roots
+    //             barely clipped at the radius edge move less than eight tips
+    //             taken head-on, and weight says so while count does not.
+    //   u         where along the curtain the contact is, 0..1, averaged over
+    //             the hit particles and weighted by the same falloff. Taken
+    //             from `strand.rootU` when the piece has one (the horse's mane
+    //             spline) and from the strand's build order otherwise.
+    //   speed     cursor speed, 0..1, normalised against SPEED_FULL below.
+    //   nx        cursor x across the viewport, 0..1, for stereo placement.
+    this.contact = { hit: false, count: 0, weight: 0, u: 0.5, speed: 0, nx: 0.5 };
   }
 
   // (Re)build all strands for the current cover transform + dpr.
@@ -126,7 +145,10 @@ export class HairSystem {
         rootY,
         length,
         index: s,
-        textCursor: cursor,
+        // Where this strand reads from. Normally it carries on from the previous
+        // strand, so the curtain never repeats itself; with CONFIG.textFromRoot it
+        // starts at 0, which is how one word comes out legible down every strand.
+        textCursor: CONFIG.textFromRoot && !CONFIG.charPool ? 0 : cursor,
         text,
         z: root.z ?? 0,
         zTip: root.zTip ?? null,
@@ -326,7 +348,7 @@ export class HairSystem {
         c.width = c.height = box * dpr;
         const g = c.getContext("2d");
         g.scale(dpr, dpr);
-        g.font = `${CONFIG.fontWeight} ${fs}px ui-monospace, "SF Mono", Menlo, monospace`;
+        g.font = `${CONFIG.fontWeight} ${fs}px ${CONFIG.fontFamily}`;
         g.textAlign = "center";
         g.textBaseline = "middle";
         // BLOOM FIRST, under everything: the light the character throws, laid down
@@ -428,12 +450,38 @@ export class HairSystem {
     const radialCenterX = useRadialPush ? rp.cover.offsetX + rp.cx * rp.cover.drawW : 0;
     const radialCenterY = useRadialPush ? rp.cover.offsetY + rp.cy * rp.cover.drawH : 0;
 
+    // Contact accumulators, summed over every particle the cursor reaches this
+    // frame and folded into `this.contact` once the loop is done. `uAcc` is
+    // weighted by the same falloff as `wAcc`, so a contact straddling two parts
+    // of the curtain reports the part it is actually pressing rather than the
+    // arithmetic middle of the two.
+    let cCount = 0;
+    let wAcc = 0;
+    let uAcc = 0;
+    // Position along the curtain comes from BUILD ORDER, not from screen x or y.
+    // Build order runs along the curtain by construction — the horse picks its
+    // roots evenly along the mane spline, the willow along its branches — so
+    // index/(count-1) is a real curtain coordinate that survives the subject
+    // moving, turning or being re-tracked. Screen position would not: the horse's
+    // head crosses the frame, and a mapping keyed to screen x would make the same
+    // lock of hair change note as the animal walks.
+    const strandCount = this.strands.length;
+    const uDen = Math.max(1, strandCount - 1);
+    let si = -1;
+
     for (const strand of this.strands) {
+      si++;
       const gain = strand.windGain ?? 1;
       // Outward pull for this strand, stronger toward the tip. Without it gravity
       // straightens the arc built into the resting pose within a second or two
       // and every strand collapses back to a parallel vertical line.
-      const spread = CONFIG.drapeSpread * (strand.drape ?? 0);
+      // `drapeGain` lets a piece dial this strand's lateral bias per frame without a
+      // rebuild, which matters because `drape` is ALSO baked into the resting pose and so
+      // cannot be rewritten mid-clip. Same shape as `windGain` and `pullX` above: absent
+      // means 1, and the two pieces that do not set it are untouched. The horse uses it to
+      // fade the forelock's forward push out at the poses where "forward" stops meaning
+      // "over the forehead" — see aimForelock() in horse/js/main.js.
+      const spread = CONFIG.drapeSpread * (strand.drape ?? 0) * (strand.drapeGain ?? 1);
       // Per-strand aimed pull, if the piece set one. Scaled toward the tip like every
       // other lateral term, so the attachment stays put and the loose end travels.
       const pullX = strand.pullX || 0;
@@ -481,6 +529,13 @@ export class HairSystem {
             // Falls off to nothing at the edge of the radius, and scales toward
             // the tip: the attachment barely gives, the loose end gives a lot.
             const k = (1 - d / pt.radius) ** pt.falloff * p.depth;
+            // `k` is already exactly the quantity the sound wants — how much
+            // THIS particle is being displaced — so the contact measurement
+            // rides along on the force calculation instead of costing a second
+            // pass over the particles.
+            cCount++;
+            wAcc += k;
+            uAcc += (si / uDen) * k;
             p.addForce(
               (dx / d) * pt.push * k + pointer.vx * pt.drag * k,
               (dy / d) * pt.push * k + pointer.vy * pt.drag * k
@@ -496,6 +551,28 @@ export class HairSystem {
         }
       }
     }
+    // Fold the accumulators into the frame's contact report. Kept next to the
+    // loop that produced it rather than deferred, so a piece reading
+    // `hair.contact` after update() always sees this frame and never the last.
+    const c = this.contact;
+    c.hit = this.pointerHit;
+    c.count = cCount;
+    c.weight = wAcc;
+    if (wAcc > 0) c.u = uAcc / wAcc; // else: hold the last u, so a re-touch in
+    // the same place resumes there instead of snapping to the middle of the
+    // curtain for one frame.
+    // Cursor speed, normalised. 26 px/frame is not a limit of the hardware, it
+    // is where a deliberate brush across the curtain tops out — measured by
+    // logging hypot(vx, vy) while sweeping. Past it the gesture is a flick, and
+    // a flick should read as "as fast as this gets", not keep scaling.
+    //
+    // Forced to zero the moment the cursor stops arriving, rather than left to
+    // the velocity decay: a stationary cursor must report a stationary gesture
+    // immediately and unconditionally, including in a piece whose render loop is
+    // paused and therefore is not decaying anything.
+    c.speed = isPointerMoving() ? Math.min(1, Math.hypot(pointer.vx, pointer.vy) / 26) : 0;
+    c.nx = window.innerWidth > 0 ? Math.min(1, Math.max(0, pointer.x / window.innerWidth)) : 0.5;
+
     const effectiveDamping = CONFIG.damping * dampingBoost;
     for (const p of this.particles) p.integrate(dt, effectiveDamping);
 
@@ -796,6 +873,14 @@ export class HairSystem {
     // Per strand rather than over the flat particle list, because depth applies
     // to a whole strand and the draw order is by strand.
     for (const strand of this._drawOrder()) {
+      // Per-strand draw weight, if the piece set one (absent = 1, so the other pieces are
+      // untouched). It multiplies the glyph alpha rather than gating the strand, so a strand
+      // fades in and out instead of popping — a hard cut on a moving subject reads as
+      // flicker. Below the threshold the whole strand is skipped, which is also the point:
+      // the horse uses this to THIN a band whose projected width collapses, and the glyphs
+      // it drops are glyphs it no longer pays for. See thinForelock() in horse/js/main.js.
+      const drawGain = strand.drawGain ?? 1;
+      if (drawGain <= 0.004) continue;
       const constantZ = !depth.enabled || strand.zTip === strand.z;
       // When z is constant along the strand the bucket is resolved once; when it
       // isn't, it has to be resolved PER CHARACTER, which is what lets a strand
@@ -831,7 +916,7 @@ export class HairSystem {
         if (!img) continue;
 
         const s = p.scale * zScale;
-        ctx.globalAlpha = p.alpha * lerp(1, 1 - CONFIG.tipFade, p.depth) * zAlpha;
+        ctx.globalAlpha = p.alpha * lerp(1, 1 - CONFIG.tipFade, p.depth) * zAlpha * drawGain;
 
         if (!rotate) {
           // FAST PATH: glyphs stay upright. One transform is set for the whole

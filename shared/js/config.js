@@ -44,9 +44,29 @@ export const CONFIG = {
   words: ["FILAMENTO", "MEMORY", "MOTION", "BODY", "SYSTEM", "IDENTITY", "DATA", "010101"],
   charPool: null,
   charSequenceLength: 4096,
+  // Every strand starts at the FIRST character of the text instead of where the
+  // previous strand left off, so a one-word text reads as that word from the root
+  // down, over and over, in every strand — the curtain says something instead of
+  // showing a slice of something. The trailing space hairText() adds is what
+  // separates one repetition from the next.
+  //
+  // Ignored when `charPool` is set, and that is not a limitation but the rule: a
+  // pool is a shuffled repertoire with no first character to start from, so
+  // starting every strand at index 0 would make every strand identical.
+  textFromRoot: false,
 
   // ----- GLYPHS ------------------------------------------------------------
   color: "#ffd9ee", // glyph fill. Must be LIGHTER than what it falls over.
+  // The typeface the curtain is SET IN. A stack, and the last entries matter: the
+  // atlas is baked once (hairSystem._buildAtlas) and canvas falls back silently, so
+  // whatever is reachable when the build runs is what the piece wears all session —
+  // see shared/js/fonts.js, which is what makes the wait certain.
+  //
+  // A proportional face is fine here even though this looks like a job for a
+  // monospace one: every glyph is drawn CENTRED in its own square box and the step
+  // along a strand is `segmentLength`, never the character's advance width. Nothing
+  // downstream reads a glyph's width.
+  fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
   fontSize: 16,
   fontWeight: 300, // 300 light / 400 regular; keep off bold
   // Rotate each glyph to follow its strand's local direction. Off is both cheaper

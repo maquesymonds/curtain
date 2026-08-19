@@ -28,7 +28,7 @@ import { CONFIG, AUTHORED_SYSTEMS } from "./config.js";
 import { computeCover, normToScreen, screenToNorm } from "../../shared/js/cover.js";
 import { loadImage, getImageData, sampleRootsFromLine, CollisionField } from "./imageSampler.js";
 import { HairSystem } from "../../shared/js/hairSystem.js";
-import { hash, lerp, sampleProfile } from "../../shared/js/utils.js";
+import { hash, lerp, sampleProfile, smoothstep } from "../../shared/js/utils.js";
 import {
   TRACK_ORDER,
   arcLengthUs,
@@ -43,8 +43,18 @@ import { TrackingEditor } from "./trackingEditor.js";
 import { TrackingSource } from "./trackingSource.js";
 import { Silhouette } from "./silhouette.js";
 import { stageReady, onStage } from "../../shared/js/stage.js";
+import { ensureGlyphFont } from "../../shared/js/fonts.js";
+import { offerTuning } from "../../shared/js/tune.js";
+import { TUNE_SPEC } from "./tune.js";
 import { attachPointer, decayPointer } from "../../shared/js/pointer.js";
-import { notifyPointerHit } from "../../shared/js/interactionSound.js";
+import { notifyContact, configureSound } from "../../shared/js/interactionSound.js";
+
+// Measured with synthetic sweeps at three speeds, reading window.maneStats: a
+// brisk 16 px/frame brush across the crest produces contact.weight p50 19.0,
+// p90 32, peak 37, with 422 particles inside pointer.radius 114. 30 puts that
+// brush at 0.63 of full, a slow one at 0.19, and burying the cursor in the
+// densest part of the mane at 1.0.
+configureSound({ weightFull: 30 });
 
 const IDENTITY = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
 const TAU = Math.PI * 2;
@@ -398,11 +408,14 @@ const AIM_EPS = 0.012;
 function aimForelock(base) {
   if (!hair) return;
   const fl = CONFIG.maneShape.forelock;
-  const mag = fl.enabled ? fl.pull : 0;
   for (const s of hair.strands) {
-    if (!mag || s.rootU >= fl.untilU) {
+    // Gated on MEMBERSHIP, not on force. `pull` at 0 still has to leave the drape fade below
+    // running — otherwise dragging pull to zero silently switches off a second, unrelated
+    // behaviour — while a strand behind the parting wants neither of the two.
+    if (!fl.enabled || s.rootU >= fl.untilU) {
       s.pullX = 0;
       s.pullY = 0;
+      s.drapeGain = 1;
       continue;
     }
     const u = s.rootU;
@@ -412,15 +425,47 @@ function aimForelock(base) {
     let ty = b[1] - a[1];
     const len = Math.hypot(tx, ty) || 1;
     // Negated: `base` runs front -> back, and the forelock goes the other way.
-    const dx = -tx / len;
-    const dy = -ty / len;
+    const crestX = -tx / len;
+    const crestY = -ty / len;
 
-    // AND SCALED BY WHAT IS ACTUALLY THERE. The aim comes from the crest, and the crest
-    // is not the face: at the poses where the head turns toward the camera, "forward along
-    // the crest" leaves the head after a few px. Pulling hard in a direction with no horse
-    // in it is what threw the tuft into the sky. So the pull is proportional to the room
-    // it has — full strength with `pullClearPx` of horse ahead, nothing with none, and the
-    // strand simply falls instead.
+    // IS "FORWARD ALONG THE CREST" STILL "DOWN THE FOREHEAD"?
+    //
+    // In profile it is, and that is the whole reason aiming along the crest works: the
+    // tangent at the poll points down the face, so the two directions are the same one and
+    // the tuft falls where a forelock falls. When the head turns to camera they come apart.
+    // Measured, the aim's own vertical component over the clip (1 = straight down, 0 =
+    // horizontal, negative = upward):
+    //     frames   1- 56  profile, forelock reads correctly   dy 0.33 .. 0.84
+    //     frames  58-101  head turned to camera               dy 0.24 -> 0.011 -> -0.135
+    //     frames 102-120  turning back to profile             dy 0.32 .. 0.61
+    // Through 68-81 the aim points slightly UPWARD and mostly sideways, and pulling along
+    // it marches the tuft across the face and out past the ear: 18 of 84 strands more than
+    // 65 degrees off vertical at frame 72.
+    //
+    // AND THE CLEARANCE GAIN BELOW WAS ANSWERING THE OPPOSITE QUESTION. Measured per frame,
+    // it sat at 0.2-0.4 through the poses where the aim is good and 0.87-1.00 through the
+    // window where it is wrong — because "is there horse ahead" is trivially yes when ahead
+    // is the face. It handed the pull full strength exactly when the pull was worst aimed.
+    //
+    // So the aim itself gives way to STRAIGHT DOWN as its vertical component vanishes. Not
+    // killed — redirected, which is what the strand wants anyway: with the crest no longer
+    // pointing anywhere useful, a forelock simply falls over the forehead. Below the near
+    // end of `aimDown` the pull is pure gravity's direction; above the far end it is the
+    // crest tangent untouched; between, a blend. Per strand, not per frame: the 24 strands
+    // in the zone disagree by 0.5 in dy at the same instant (f76: -0.334 .. 0.190).
+    const [downFrom, downTo] = fl.aimDown;
+    const keep = smoothstep(downFrom, downTo, crestY);
+    let dx = crestX * keep;
+    let dy = crestY * keep + (1 - keep);
+    const dl = Math.hypot(dx, dy) || 1;
+    dx /= dl;
+    dy /= dl;
+
+    // AND SCALED BY WHAT IS ACTUALLY THERE. Pulling hard in a direction with no horse in it
+    // is what threw the tuft into the sky, so the pull is proportional to the room it has —
+    // full strength with `pullClearPx` of horse ahead, nothing with none. Probed along the
+    // BLENDED direction, not the raw tangent: the question is whether there is horse where
+    // the strand is actually being pulled, which after the blend above is a different place.
     let gain = 1;
     if (CONFIG.silhouette.enabled && silhouette && silhouette.ok) {
       const room = silhouette.clearance(
@@ -433,8 +478,88 @@ function aimForelock(base) {
       );
       gain = room / CONFIG.silhouette.pullClearPx;
     }
-    s.pullX = dx * mag * gain;
-    s.pullY = dy * mag * gain;
+    s.pullX = dx * fl.pull * gain;
+    s.pullY = dy * fl.pull * gain;
+
+    // The same weight on the LATERAL DRAPE, which is the other half of what holds the tuft
+    // forward. The forelock's drape is 1.6-2.4 against the mane's, aimed at the face by
+    // sign, and unlike the pull it is not re-derived from anything — it is a screen-space
+    // +x force that keeps pushing toward the face whichever way the head is pointing. So it
+    // fades with `keep` too, floored at the mane's own share rather than at zero: a strand
+    // with no lateral bias at all collapses to a vertical line of type.
+    s.drapeGain = lerp(fl.aimDownDrapeFloor, 1, keep);
+  }
+}
+
+// THIN THE FORELOCK WHEN ITS BAND FORESHORTENS.
+//
+// The roots of the forelock are spaced along the crest by its PARAMETER, u, and their count
+// is fixed at build time. In profile that is right: `u < untilU` is a real stretch of crest
+// with real width on screen. When the head turns to camera the same stretch projects onto a
+// fraction of that width, and the strand count does not notice — so the same hair is drawn
+// into a smaller and smaller area until it stops reading as a tuft and reads as a bright
+// knot of overlapping type sitting on the poll, with its outer edge spilling past the ear
+// into the sky.
+//
+// Measured, the projected arc length of the u < 0.16 band over the clip:
+//     frames   4- 44  profile          99-112 px    21-24 roots per 100px    ~0-1% over sky
+//     frame       67  turned to camera     46 px    51.6 roots per 100px         54% over sky
+//     frames  71- 80                     59-63 px    38-41 roots per 100px      8-40% over sky
+//     frames 100-120  back to profile    88-102 px   23-27 roots per 100px           0% over sky
+// A 2.61x collapse at 2.4x the root density. That is the whole of the remaining defect, and
+// it is why nothing about AIM fixed it. Measured and rejected on the way here, all on the
+// same window, so nobody has to try them again:
+//     re-aiming the pull toward straight down   worked, but on a different symptom (aimDown)
+//     rotating the resting pose per frame       reoriented it 26.5 deg, changed the result by
+//                                               nothing: 55.9% -> 58.0% over sky. Reverted.
+//     whorl strength 0.62 -> 0.30               worse
+//     whorl radius 0.17 -> 0.10                 worse
+//     rootFlowStrength 0.72 -> 0.40             worse
+//     flowMaxDeg 96 -> 60                       flat
+//     wind off / drapeX 0                       flat
+//     damping 0.83 -> 0.40                      46% -> 31% mean, and the profile poses cost
+//                                               more than the frontal ones gained
+// The last one is why inertia is not the answer either: frames 100-120 move the roots as fast
+// as frame 62 does and sit at 0% over sky, because their band is 88-102px wide.
+//
+// So keep the density constant in SCREEN space instead of in u. `keep` is how much of the
+// reference width the band still has; strands fade out in a fixed shuffled order as it
+// shrinks, so the same hair always goes first and there is no shimmer from the set changing
+// its mind. A fade, not a cut: `feather` is how wide the crossover is in units of keep.
+function thinForelock(tbl) {
+  if (!hair) return;
+  const cfg = CONFIG.maneShape.forelockThin;
+  if (!cfg.enabled) {
+    for (const s of hair.strands) s.drawGain = 1;
+    return;
+  }
+  const until = CONFIG.maneShape.forelock.untilU;
+
+  // Projected width of the band THIS frame, walked along the smoothed table the roots
+  // themselves sit on, so it is the same curve and the same offset they are placed by.
+  const STEPS = 48;
+  let arc = 0;
+  let prev = crestPoint(tbl, 0, 1);
+  for (let i = 1; i <= STEPS; i++) {
+    const pt = crestPoint(tbl, (i / STEPS) * until, 1);
+    arc += Math.hypot(pt[0] - prev[0], pt[1] - prev[1]);
+    prev = pt;
+  }
+
+  // Shaped, not linear. `refArcPx` is where thinning STOPS, so a linear ratio would have to
+  // be raised above the profile width to bite at all — and then it would thin the profile
+  // poses too, which is the one thing this must not do. The exponent keeps 1.0 at the
+  // reference and falls away fast below it: at 2, the profile poses (99-112px) stay at 24
+  // strands while frame 72 (59px) drops to 8 and frame 67 (46px) to 5.
+  const ratio = Math.min(1, arc / cfg.refArcPx);
+  const keep = cfg.curve === 1 ? ratio : ratio ** cfg.curve;
+  for (const s of hair.strands) {
+    if (s.rootU >= until) {
+      s.drawGain = 1;
+      continue;
+    }
+    const rank = s.rootDef?.thinRank ?? 0;
+    s.drawGain = Math.max(0, Math.min(1, 1 + (keep - rank) / cfg.feather));
   }
 }
 
@@ -447,6 +572,7 @@ function applyManeFrame(mediaTime) {
   if (hair) {
     hair.updateRoots(cover, maneCurveFrom(tbl));
     aimForelock(base);
+    thinForelock(tbl);
   }
   return tbl;
 }
@@ -626,6 +752,10 @@ function buildVideoRoots(count) {
   const tbl = buildCrestTable(curveAt(0));
   const us = rootUs(count);
   const roots = [];
+  // Index WITHIN the forelock band, for the drop order thinForelock() uses. Counted rather
+  // than derived from i, because the band's share of the roots is set by forelock.density and
+  // is not a fixed fraction of `count`.
+  let foreIdx = 0;
   for (let i = 0; i < count; i++) {
     const u = us[i];
     // Where in the band this hair is rooted. 1 = out on the silhouette, less = set
@@ -679,6 +809,12 @@ function buildVideoRoots(count) {
       // and a few degrees of scatter here is the difference between a mane and a
       // combed sheet.
       angle: rootAngle(tbl, u, [x, y]) + (hash(i * 9.41) - 0.5) * 2 * m.flowJitterDeg,
+      // WHICH HAIR GOES FIRST when the band foreshortens, in [0,1). The golden-ratio
+      // sequence rather than a hash: with only ~24 strands in the band a hash clumps, and a
+      // clumped drop order thins one side of the tuft and leaves the other at full density —
+      // which reads as the forelock developing a parting rather than getting thinner. This
+      // spreads every prefix of the order evenly across the band.
+      thinRank: u < m.forelock.untilU ? (foreIdx++ * 0.6180339887498949) % 1 : 1,
     });
   }
   return withNeonDepth(roots);
@@ -917,6 +1053,15 @@ async function initVideo() {
   // Last, and only behind the flag: the panel must never delay the first frame, and
   // for a visitor the 2.6MB studio bundle is not even a request.
   if (controlsWanted) startControls();
+
+  // The visitor's dozen knobs (shared/js/tune.js): no dependency, no flag, drawn
+  // by the shell. After stageReady() on purpose — announcing them is not worth a
+  // millisecond of the first frame, and the shell keeps the panel closed anyway.
+  //
+  // Video mode only, like startControls above, and for the same reason: the apply
+  // handler rebuilds the mane from the tracked crest (rebuildMane -> buildVideoRoots),
+  // which is not where the static photo's roots come from.
+  offerTuning({ CONFIG, spec: TUNE_SPEC, onApply: applyControlChange });
 }
 
 // ---------------------------------------------------------------------------
@@ -1030,7 +1175,7 @@ function startVideoLoop() {
       // roots follow the tracked crest (tracking, not physics — always on)
       applyManeFrame(mediaTime);
       hair.update(dt, mediaTime); // no-op when every subsystem is off
-      notifyPointerHit(hair.pointerHit);
+      notifyContact(hair.contact);
       // After the forces have been applied, so a flick pushes once and then lets go.
       decayPointer(CONFIG.pointer.decay);
     }
@@ -1222,7 +1367,7 @@ function staticLoop(now) {
   const dt = Math.min((now - lastPerf) / 16.6667, 2.2) || 1;
   lastPerf = now;
   hair.update(dt, now / 1000);
-  notifyPointerHit(hair.pointerHit);
+  notifyContact(hair.contact);
   decayPointer(CONFIG.pointer.decay);
   renderStatic();
 }
@@ -1514,14 +1659,26 @@ function onResize() {
 // ---------------------------------------------------------------------------
 console.info(`Neon Mane boot — ${BUILD} — mode=${MODE}${inspecting() ? " (inspecting)" : ""}`);
 
-if (MODE === "video") {
-  initVideo().catch((err) => {
-    console.error(
-      "initVideo failed, so the mane never started. The video may still be playing " +
-        "underneath via its autoplay attribute, which looks like an empty canvas.",
-      err
-    );
-  });
-} else {
-  initStatic().catch((err) => console.error("initStatic failed:", err));
+// The typeface is a BUILD INPUT, not a style: the glyph atlas is baked once and
+// canvas falls back to the next family in the stack without saying so, so a font
+// that lands a moment after build() would leave the mane in the fallback face for
+// the whole session. Awaited HERE, ahead of both modes, because it is the one thing
+// both of them need before they can reach hair.build(). See shared/js/fonts.js —
+// it gives up after 2.5s rather than hold the piece hostage to a font.
+async function boot() {
+  console.info(`Font: ${await ensureGlyphFont(CONFIG.fontFamily, CONFIG.fontWeight)}`);
+
+  if (MODE === "video") {
+    initVideo().catch((err) => {
+      console.error(
+        "initVideo failed, so the mane never started. The video may still be playing " +
+          "underneath via its autoplay attribute, which looks like an empty canvas.",
+        err
+      );
+    });
+  } else {
+    initStatic().catch((err) => console.error("initStatic failed:", err));
+  }
 }
+
+boot();

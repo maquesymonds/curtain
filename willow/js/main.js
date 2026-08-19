@@ -25,8 +25,15 @@ import { StrandStore } from "./strandStore.js";
 import { StrandEditor } from "./strandEditor.js";
 import { sampleBranchStrands } from "./branchSampler.js";
 import { attachPointer, decayPointer } from "../../shared/js/pointer.js";
-import { notifyPointerHit } from "../../shared/js/interactionSound.js";
+import { notifyContact, configureSound } from "../../shared/js/interactionSound.js";
 import { stageReady, onStage } from "../../shared/js/stage.js";
+
+// Eight times the horse's, and not a preference: the fronds put 3832 particles
+// inside the same radius against the mane's 422, and contact.weight is a sum
+// over all of them. Measured, a brisk 16 px/frame brush reads p50 152.2, p90
+// 256, peak 294. At the horse's 30 the willow would sit pinned at full
+// intensity with no dynamics left.
+configureSound({ weightFull: 240 });
 
 const IDENTITY = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
 const BUILD = "2026-08-09 · willow, hand-placed strands + anchor clusters";
@@ -209,7 +216,7 @@ function loop(now) {
     }
     if (hair) {
       hair.update(dt, clock);
-      notifyPointerHit(hair.pointerHit);
+      notifyContact(hair.contact);
     }
     // After the forces are applied, so a flick pushes once and then releases.
     decayPointer(CONFIG.pointer.decay);

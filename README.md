@@ -40,7 +40,41 @@ sospechas, recarga con **Cmd+Shift+R**.
 
 ---
 
-## Jugar con los parámetros sin tocar código
+## El botón de jugar (el que ve cualquiera)
+
+Arriba a la izquierda está la marca **FILAMENTO**, que lleva al
+[Instagram](https://www.instagram.com/filamento____/?hl=en). Arriba a la derecha
+hay un botón de **play**: abre un panel con una docena de mandos sobre la pieza
+que estás viendo — los tres colores con los que se hornea cada letra, la fuerza
+que la mueve (viento en el caballo, corriente en el pez), el tamaño y el brillo
+del tipo, el texto mismo, y el sonido. **volver al original** deshace todo. La
+tecla **P** lo abre y lo cierra, **Esc** lo cierra.
+
+El mando `alphabet` cambia el repertorio entero: **filamento** (la palabra, que es
+lo que la pieza dice por defecto), **numbers** y **chinese** — 24 caracteres que son
+el vocabulario de las piezas mismas (絲 filamento, 線 hilo, 文 escritura, 光 luz,
+水 agua, 風 viento, 馬 caballo, 魚 pez…). El pez añade **code**, su pool autorado.
+El campo de texto de al lado edita siempre **lo que la pieza está dibujando de
+verdad** — el pool cuando hay pool, las palabras cuando no.
+
+Nada de esto se guarda: recargas y la pieza vuelve a estar como la escribió su
+`config.js`.
+
+Cómo está montado, por si hay que añadir un mando: **la pieza decide qué se puede
+tocar, el shell sólo lo dibuja**. Cada pieza declara su lista en
+`horse/js/tune.js` / `fish/js/tune.js` y la ofrece por `postMessage`
+(`shared/js/tune.js`); el `index.html` de la raíz no conoce ni un solo nombre de
+parámetro. Por eso el mismo slider puede ser `windStrength` en el caballo y
+`swell.strength` en el pez, y por eso añadir un mando no toca el shell.
+
+Cada entrada declara lo que cuesta el cambio, con las mismas tres palabras que
+usa el panel de autor: `live` (se lee cada fotograma), `atlas` (hay que
+rehornear los bitmaps de las letras, ~6 ms) y `rebuild` (se lee mientras se
+construyen los mechones, así que hay que reconstruirlos).
+
+---
+
+## Jugar con TODOS los parámetros (para trabajar la pieza)
 
 Añade `?controls` a la URL de cualquier pieza:
 
@@ -50,10 +84,15 @@ http://localhost:8000/willow/?controls
 http://localhost:8000/horse/?controls
 ```
 
-Se abre un panel con los valores en vivo — color, brillo, tamaño de letra,
-fuerza del agua, longitud de las aletas — y se ve el cambio al momento. Es la
-forma de trastear sin miedo: **nada de lo que toques ahí se guarda**, recargas y
-vuelve a estar como estaba.
+Se abre un panel con **todos** los valores en vivo — no la docena del botón de
+jugar, sino los cien y pico parámetros de la pieza: color, brillo, tamaño de
+letra, fuerza del agua, longitud de las aletas, la rampa de profundidad — y se ve
+el cambio al momento. Es la forma de trastear sin miedo: **nada de lo que toques
+ahí se guarda**, recargas y vuelve a estar como estaba (el botón "copiar cambios"
+imprime sólo lo que moviste, listo para pegar en `config.js`).
+
+Pesa 2,6 MB y sólo se descarga con el flag puesto: quien entra a mirar la pieza
+no lo pide nunca.
 
 Con `?diag` (o la tecla **D**) sale un panel de diagnóstico: cuántos mechones hay,
 cuántas letras se están dibujando, si el vídeo va, etc. Sirve para entender por
@@ -73,17 +112,41 @@ __fish.cfg.color = "#00ffcc"       // (hace falta __fish.rebuild() después)
 Sin instalación, sin compilar, sin dependencias. HTML, CSS y JavaScript a pelo.
 
 ```
-index.html    la galería: pasa entre las tres piezas con las flechas
+index.html    la galería: marca, botón de jugar y paso entre piezas
 fish/         pez  — aletas de código
 willow/       sauce — lianas
 horse/        caballo — crin
 shared/       la física, el dibujado y la configuración base de las tres
+              (shared/js/tune.js = el canal del botón de jugar)
+shared/fonts/ Chakra Petch autoalojada — la tipografía de todo, obra y UI
+              (shared/js/alphabets.js = los repertorios del mando alphabet)
 serve.py      el servidor local
 ```
 
 Cada pieza vive en su propio iframe y sólo la que estás viendo consume CPU: un
 iframe oculto no ejecuta animación, y eso importa porque el sauce solo tiene
 20.000 partículas.
+
+**La crin dice FILAMENTO.** `words: ["FILAMENTO"]` más `textFromRoot`, que hace que
+cada mechón empiece en la primera letra en vez de seguir donde terminó el anterior:
+así la palabra se lee verticalmente, de la raíz a la punta, una y otra vez, en cada
+mechón. Antes las ocho palabras se unían en una sola cadena y cada mechón tomaba una
+tajada desde donde quedó el previo — por eso no decía nada, un mechón arrancaba en
+"AMENTO MEMORY MOT". Medido: 82 de los 84 mechones leen la palabra completa; los
+otros dos tienen 8 partículas y en 8 no cabe una palabra de 9 letras.
+
+**La tipografía es Chakra Petch, autoalojada** (`shared/fonts/`, 96 kB de latin +
+latin-ext; nada de `fonts.googleapis.com`). Es un **input del build**, no un
+estilo: cada carácter se hornea una vez en un atlas de canvas, y `ctx.font` cae a
+la familia de reserva sin avisar, así que una fuente que llega tarde deja la pieza
+en la reserva toda la sesión. Por eso `shared/js/fonts.js` la espera antes del
+primer `build()`, con un límite de 2,5 s — una pieza con letras en la cara de
+reserva vale infinitamente más que una pieza sin letras.
+
+Al ser proporcional en vez de monoespaciada hubo que reajustar el paso del pez
+(`segmentLength` 8.95 → 7.15): con este charPool, casi todo puntuación, la media
+de ancho cae de 6,62 px a 5,28 px y los radios se leían como una fila de puntos en
+vez de una línea continua. El número y su medida están en `fish/js/config.js`.
 
 Los ajustes de cada pieza están en su `js/config.js`, con un comentario en cada
 parámetro explicando qué hace y, cuando se midió, con el número medido. Ese es el

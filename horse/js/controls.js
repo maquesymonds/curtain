@@ -87,6 +87,17 @@ export const CONTROL_SPEC = {
     whorlSpin: { path: "maneShape.whorl.spin", range: [-1, 1], apply: "rebuild" },
   },
 
+  // ----- keeping the forelock's density in SCREEN space ---------------------
+  // `refArcPx` is the projected band width at which nothing is thinned, so LOWERING it thins
+  // less and raising it thins more. Drag it while parked around frame 67, where the band is
+  // at its narrowest (46px measured).
+  adelgazar: {
+    enabled: { path: "maneShape.forelockThin.enabled", apply: "live" },
+    refArcPx: { path: "maneShape.forelockThin.refArcPx", range: [40, 200], apply: "live" },
+    curve: { path: "maneShape.forelockThin.curve", range: [1, 4], apply: "live" },
+    feather: { path: "maneShape.forelockThin.feather", range: [0.02, 0.6], apply: "live" },
+  },
+
   // ----- the forelock, and the parting it implies ---------------------------
   // `untilU` is where the parting sits: everything in front of it falls toward the face.
   // Keep it above maneShape.rootURange.0 (0.055) or the zone collapses and the control
@@ -98,6 +109,14 @@ export const CONTROL_SPEC = {
     density: { path: "maneShape.forelock.density", range: [1, 5], apply: "rebuild" },
     flow: { path: "maneShape.forelock.flow", range: [0, 1], apply: "rebuild" },
     pull: { path: "maneShape.forelock.pull", range: [0, 0.3], apply: "live" },
+    // Where the crest aim gives way to straight down, in units of the aim's own vertical
+    // component. Both live, and worth dragging together while scrubbing through frames
+    // 55-105: that is the whole turn to camera, and these two decide what happens in it.
+    aimDownFrom: { path: "maneShape.forelock.aimDown.0", range: [-0.4, 0.6], apply: "live" },
+    aimDownTo: { path: "maneShape.forelock.aimDown.1", range: [-0.2, 1], apply: "live" },
+    // Inert at 1 on purpose — see the measured sweep in config.js. At 0 it halves what is
+    // left of the sideways march, at the cost of the tuft's lateral bias at those poses.
+    aimDownDrapeFloor: { path: "maneShape.forelock.aimDownDrapeFloor", range: [0, 1], apply: "live" },
     drapeMin: { path: "maneShape.forelock.drape.0", range: [0, 8], apply: "rebuild" },
     drapeMax: { path: "maneShape.forelock.drape.1", range: [0, 8], apply: "rebuild" },
     lean: { path: "maneShape.forelock.lean", range: [-2, 2], apply: "rebuild" },

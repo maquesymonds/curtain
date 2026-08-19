@@ -1,15 +1,20 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>curtain — tipografía animada</title>
+<title>curtain — animated typography</title>
+  <link rel="stylesheet" href="shared/css/fonts.css" />
 <style>
   * { box-sizing: border-box; }
   html, body {
     margin: 0; padding: 0; width: 100%; height: 100%;
     background: #000; overflow: hidden; overscroll-behavior: none;
-    font: 400 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+    /* Chakra Petch, self-hosted (shared/css/fonts.css) — the same face the
+       curtain itself is set in, so the chrome and the work are one typography
+       instead of a monospace UI parked on top of a piece. The monospace stack
+       stays as the fallback. */
+    font: 400 13px/1.5 "Chakra Petch", ui-monospace, "SF Mono", Menlo, monospace;
     color: #fff;
   }
 
@@ -51,9 +56,9 @@
     text-shadow: 0 0 10px rgba(0,0,0,0.95);
     pointer-events: none;
   }
-  #num { opacity: 0.4; font-variant-numeric: tabular-nums; }
+  #num { opacity: 0.8; font-variant-numeric: tabular-nums; }
   #name { font-size: 15px; letter-spacing: 0.14em; text-transform: uppercase; }
-  #desc { opacity: 0.5; }
+  #desc { opacity: 0.85; }
 
   #dots {
     left: 50%; transform: translateX(-50%); bottom: 24px;
@@ -68,25 +73,162 @@
   .dot[aria-current="true"] { background: #fff; transform: scale(1.25); }
 
   #hint {
-    right: 26px; bottom: 24px; opacity: 0.52;
+    right: 26px; bottom: 24px; opacity: 0.88;
     pointer-events: none; text-shadow: 0 0 10px rgba(0,0,0,0.95);
     transition: opacity 600ms ease;
   }
   #hint.gone { opacity: 0; }
+
+  /* ----- the wordmark. The only thing on this page that is not the work:
+     whose work it is, and where to find more of it. ----- */
+  #brand { left: 26px; top: 18px; }
+  #mark {
+    display: inline-flex; align-items: baseline; gap: 8px;
+    color: #fff; text-decoration: none;
+    /* No text-shadow, on purpose: the halo under it was reading as a smudge
+       against the sky. Plain white at full opacity instead — the wordmark is not
+       part of the faint chrome, it is the signature. */
+    font-size: 30px; letter-spacing: 0.08em; text-transform: uppercase;
+    opacity: 1;
+  }
+  /* No underline on hover either: the wordmark is set once and does not need to
+     perform being a link. The pointer and the tab focus ring are enough. */
+  #mark:hover, #mark:focus-visible { outline: none; }
+  #mark em { font-style: normal; font-size: 19px; letter-spacing: 0; opacity: 0.75; }
+  /* ----- the play button, and the panel it opens ----- */
+  #play {
+    top: 20px; right: 22px;
+    display: inline-flex; align-items: center; gap: 9px;
+    padding: 8px 15px; border-radius: 999px; cursor: pointer;
+    border: 1px solid rgba(255,255,255,0.22);
+    background: rgba(0,0,0,0.32);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    color: #fff; font: inherit; font-size: 11px;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    opacity: 0.92; transition: opacity 180ms ease, border-color 180ms ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #play:hover, #play:focus-visible { opacity: 1; border-color: rgba(255,255,255,0.6); outline: none; }
+  #play[aria-expanded="true"] { opacity: 1; border-color: rgba(255,255,255,0.4); }
+  #play svg { width: 10px; height: 10px; display: block; }
+  #play .close { display: none; }
+  #play[aria-expanded="true"] .close { display: block; }
+
+  #panel {
+    top: 62px; right: 22px;
+    width: min(336px, calc(100vw - 44px));
+    /* Enough for the tallest state — nine controls plus the alphabet row — without
+       clipping the footer. Still clear of the bottom chrome. */
+    max-height: calc(100vh - 118px);
+    overflow-y: auto; overscroll-behavior: contain;
+    padding: 16px 17px 14px; border-radius: 14px;
+    border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(8,8,10,0.76);
+    -webkit-backdrop-filter: blur(18px) saturate(1.3); backdrop-filter: blur(18px) saturate(1.3);
+    box-shadow: 0 18px 50px rgba(0,0,0,0.55);
+    opacity: 0; visibility: hidden; transform: translateY(-8px);
+    transition: opacity 200ms ease, transform 200ms ease, visibility 200ms;
+  }
+  #panel.open { opacity: 1; visibility: visible; transform: none; }
+  #panel h2 {
+    margin: 0; font-size: 12px; font-weight: 400;
+    letter-spacing: 0.18em; text-transform: uppercase;
+  }
+  /* +0.5px and a touch more opacity than the monospace version: Chakra Petch has
+     a smaller x-height, so the same 11px read noticeably fainter. */
+  #panel p { margin: 8px 0 0; font-size: 11.5px; line-height: 1.62; opacity: 0.94; }
+  #panel .lede { opacity: 1; }
+  #piece-name { opacity: 0.9; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; }
+
+  .tune-group { margin-top: 18px; border-top: 1px solid rgba(255,255,255,0.09); padding-top: 12px; }
+  .tune-group h3 {
+    margin: 0; font-size: 10px; font-weight: 500; opacity: 1;
+    letter-spacing: 0.22em; text-transform: uppercase;
+  }
+  .tune-note { margin: 5px 0 2px !important; opacity: 0.82 !important; }
+  .tune-row { margin-top: 11px; }
+  .tune-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .tune-name { font-size: 12px; opacity: 1; }
+  .tune-val { font-size: 11px; opacity: 0.85; font-variant-numeric: tabular-nums; }
+  .tune-inline { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  /* Two columns for the swatches: the colour group is the one that costs the most
+     height for the least ink, and 2x2 keeps "fuerza" above the fold. */
+  .tune-group[data-group="color"] { display: grid; grid-template-columns: 1fr 1fr; column-gap: 14px; }
+  .tune-group[data-group="color"] h3,
+  .tune-group[data-group="color"] .tune-note { grid-column: 1 / -1; }
+
+  #panel input[type="range"] {
+    width: 100%; margin: 5px 0 0; height: 14px;
+    accent-color: #fff; background: none; cursor: ew-resize;
+  }
+  #panel input[type="color"] {
+    width: 42px; height: 21px; padding: 0; cursor: pointer;
+    border: 1px solid rgba(255,255,255,0.28); border-radius: 4px;
+    background: none; -webkit-appearance: none; appearance: none;
+  }
+  #panel input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+  #panel input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 3px; }
+  #panel input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: #fff; cursor: pointer; }
+  #panel input[type="text"] {
+    width: 100%; margin: 6px 0 0; padding: 6px 8px;
+    border: 1px solid rgba(255,255,255,0.16); border-radius: 6px;
+    background: rgba(255,255,255,0.06); color: #fff;
+    font: inherit; font-size: 11px; letter-spacing: 0.06em;
+  }
+  #panel input[type="text"]:focus { outline: none; border-color: rgba(255,255,255,0.42); }
+  #panel select {
+    /* The native arrow is drawn in the OS's own light chrome on a dark panel, so
+       the control is stripped and given the caret as a background glyph instead. */
+    -webkit-appearance: none; appearance: none;
+    padding: 5px 26px 5px 9px; border-radius: 6px; cursor: pointer;
+    border: 1px solid rgba(255,255,255,0.22);
+    background: rgba(255,255,255,0.06) no-repeat right 8px center;
+    background-image: linear-gradient(45deg, transparent 50%, #fff 50%),
+                      linear-gradient(135deg, #fff 50%, transparent 50%);
+    background-size: 5px 5px, 5px 5px;
+    background-position: right 13px center, right 9px center;
+    background-repeat: no-repeat;
+    color: #fff; font: inherit; font-size: 11px; letter-spacing: 0.04em;
+  }
+  #panel select:focus { outline: none; border-color: rgba(255,255,255,0.5); }
+  #panel option { background: #0b0b0d; color: #fff; }
+
+  #tune-foot {
+    margin-top: 18px; padding-top: 12px;
+    border-top: 1px solid rgba(255,255,255,0.09);
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  }
+  #reset {
+    padding: 6px 11px; border-radius: 999px; cursor: pointer;
+    border: 1px solid rgba(255,255,255,0.22); background: none; color: #fff;
+    font: inherit; font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+    opacity: 0.92; transition: opacity 180ms ease, border-color 180ms ease;
+  }
+  #reset:hover, #reset:focus-visible { opacity: 1; border-color: rgba(255,255,255,0.6); outline: none; }
+  #tune-foot span { font-size: 10px; opacity: 0.7; }
 
   #loading {
     left: 50%; top: 50%; transform: translate(-50%, -50%);
     opacity: 0; pointer-events: none; letter-spacing: 0.2em;
     transition: opacity 200ms ease;
   }
-  #loading.on { opacity: 0.45; }
+  #loading.on { opacity: 0.9; }
 
   @media (prefers-reduced-motion: reduce) {
-    iframe, #hint, #loading { transition: none; }
+    iframe, #hint, #loading, #panel { transition: none; }
   }
   @media (max-width: 640px) {
     .arrow { width: 48px; }
     #desc { display: none; }
+    /* Keyboard hints on a touch screen name three things that are not there, and
+       at this width they landed on top of the piece label. The swipe, the arrows
+       and the play button are all discoverable without them. */
+    #hint { display: none; }
+    /* The word STAYS at this width. It used to be hidden in favour of the play
+       triangle; with the triangle gone (it read as a transport control) hiding the
+       word left an empty pill — nothing at all in the closed state. */
+    #play { padding: 8px 13px; }
+    #panel { top: 58px; left: 16px; right: 16px; width: auto; max-height: calc(100vh - 150px); }
   }
 </style>
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
@@ -95,29 +237,62 @@
 
 <div id="stage"></div>
 
-<button class="ui arrow" id="prev" aria-label="Pieza anterior">
+<button class="ui arrow" id="prev" aria-label="Previous piece">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
        stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
 </button>
-<button class="ui arrow" id="next" aria-label="Pieza siguiente">
+<button class="ui arrow" id="next" aria-label="Next piece">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
        stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
 </button>
+
+<header class="ui" id="brand">
+  <a id="mark" href="https://www.instagram.com/filamento____/?hl=en"
+     target="_blank" rel="noopener noreferrer"
+     title="filamento on Instagram"><span>filamento</span><em>&#8599;</em></a>
+</header>
+
+<button class="ui" id="play" type="button" aria-expanded="false" aria-controls="panel"
+        title="Move the forces and colours of the piece (P)">
+  <!-- No play triangle. It read as "press play on something" — a transport
+       control for a clip, which is not what this opens. The word carries it. -->
+  <svg class="close" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6"
+       stroke-linecap="round" aria-hidden="true"><path d="M2 2l8 8M10 2l-8 8"/></svg>
+  <span class="pword">play</span>
+</button>
+
+<div class="ui" id="panel" role="dialog" aria-label="Play with the piece">
+  <h2>Play</h2>
+  <!-- The claim has to match what the panel actually hands over. It used to
+       promise "move a number" while four force sliders were here; with those gone
+       it says what is left: the light and the words. -->
+  <p class="lede">
+    None of these letters is drawn. Each one hangs off a physics — weight, wind,
+    current, light — and the shape falls out of that. What you get to change here
+    is how it burns and what it says.
+  </p>
+  <p>You are playing <span id="piece-name"></span></p>
+  <div id="tune-body"></div>
+  <div id="tune-foot">
+    <button id="reset" type="button">back to the original</button>
+    <span>P opens and closes</span>
+  </div>
+</div>
 
 <div class="ui" id="label">
   <span id="num"></span><span id="name"></span><span id="desc"></span>
 </div>
 <div class="ui" id="dots"></div>
-<div class="ui" id="hint">← → para pasar · D diagnóstico</div>
-<div class="ui" id="loading">CARGANDO</div>
+<div class="ui" id="hint">← → to change piece · P to play · D for diagnostics</div>
+<div class="ui" id="loading">LOADING</div>
 
 <script>
 const PIECES = [
-  { slug: "horse",  src: "horse/",  name: "Caballo", desc: "crin de letras" },
-  { slug: "fish",   src: "fish/",   name: "Pez",     desc: "aletas de código · fuerzas de agua" },
+  { slug: "horse",  src: "horse/",  name: "Horse", desc: "a mane of letters" },
+  { slug: "fish",   src: "fish/",   name: "Fish",  desc: "code fins · water forces" },
   // Oculto por ahora — para reactivarlo, descomentar y ubicarlo donde
   // corresponda en el orden.
-  // { slug: "willow", src: "willow/", name: "Sauce",   desc: "lianas que cuelgan de las ramas" },
+  // { slug: "willow", src: "willow/", name: "Willow", desc: "vines hanging off the branches" },
 ];
 
 const stage = document.getElementById("stage");
@@ -127,6 +302,11 @@ const elDesc = document.getElementById("desc");
 const elDots = document.getElementById("dots");
 const elHint = document.getElementById("hint");
 const elLoading = document.getElementById("loading");
+
+const elPlay = document.getElementById("play");
+const elPanel = document.getElementById("panel");
+const elTuneBody = document.getElementById("tune-body");
+const elPieceName = document.getElementById("piece-name");
 
 const frames = new Array(PIECES.length).fill(null);
 const ready = new Array(PIECES.length).fill(false); // has posted "curtain:ready"
@@ -177,9 +357,11 @@ function ensureFrame(i) {
   return f;
 }
 
-const post = (f, type) => {
+// A string is the common case ("curtain:hide"); the tuning channel needs to send
+// a payload with it, so an object goes through untouched.
+const post = (f, msg) => {
   try {
-    f.contentWindow?.postMessage({ type }, "*");
+    f.contentWindow?.postMessage(typeof msg === "string" ? { type: msg } : msg, "*");
   } catch (_) {
     /* the piece may not have booted far enough to listen; harmless */
   }
@@ -243,6 +425,193 @@ function reveal() {
   });
 }
 
+// ---------------------------------------------------------------------------
+//  THE PANEL — a visitor's dozen knobs over whichever piece is on screen.
+//
+//  The shell knows NOTHING about what it is drawing. Each piece declares its own
+//  list of controls (horse/js/tune.js, fish/js/tune.js) and posts it over
+//  "curtain:tune"; everything here is generic — label, kind, range, value. That is
+//  why the horse's "viento" and the fish's "corriente" can be the same slider code
+//  pointing at two unrelated parameters, and why adding a knob to a piece needs no
+//  change to this file. See shared/js/tune.js for the protocol.
+//
+//  The spec objects are also where the shell REMEMBERS what the visitor did: each
+//  entry's `value` is updated as it is sent, so leaving a piece and coming back
+//  shows the piece as they left it rather than as the file wrote it.
+// ---------------------------------------------------------------------------
+const tuneSpecs = new Array(PIECES.length).fill(null);
+let panelOpen = false;
+
+// One line per group, editorial rather than technical: the panel has to say WHY
+// these particular numbers are the ones on offer. Written here and not in the
+// pieces because it is the same claim about all three of them.
+// The pieces no longer offer a "force" group — see the note in horse/js/tune.js on
+// why the physics was taken out of the visitor's panel. Nothing here had to change
+// for that: the shell renders whatever groups it is handed.
+const GROUP_NOTES = {
+  color: "Every letter is baked in three layers: halo, body, core.",
+  type: "The type and its light. Changing the text rebuilds the whole piece.",
+  sound: "The curtain is an instrument. You play it by moving the cursor through it.",
+};
+
+// Decimals enough for the step, so 0.005 reads as 0.145 and 2 reads as 114.
+const decimalsFor = (step) => {
+  const s = String(step ?? 0.01);
+  const dot = s.indexOf(".");
+  return dot < 0 ? 0 : s.length - dot - 1;
+};
+
+function sendTune(c, value) {
+  c.value = value;
+  const f = frames[index];
+  if (f) post(f, { type: "curtain:tune-set", id: c.id, value });
+}
+
+function tuneRow(c) {
+  const row = document.createElement("div");
+  row.className = "tune-row";
+  if (c.hint) row.title = c.hint;
+
+  const name = document.createElement("span");
+  name.className = "tune-name";
+  name.textContent = c.label;
+
+  if (c.kind === "number") {
+    const head = document.createElement("div");
+    head.className = "tune-head";
+    const val = document.createElement("span");
+    val.className = "tune-val";
+    const d = decimalsFor(c.step);
+    val.textContent = Number(c.value).toFixed(d);
+    head.append(name, val);
+
+    const input = document.createElement("input");
+    input.type = "range";
+    input.min = c.min;
+    input.max = c.max;
+    input.step = c.step ?? 0.01;
+    input.value = c.value;
+    input.setAttribute("aria-label", c.label);
+    input.addEventListener("input", () => {
+      const v = Number(input.value);
+      val.textContent = v.toFixed(d);
+      sendTune(c, v);
+    });
+    row.append(head, input);
+    return row;
+  }
+
+  if (c.kind === "text" || c.kind === "words") {
+    row.append(name);
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = c.value;
+    input.spellcheck = false;
+    input.setAttribute("aria-label", c.label);
+    // Debounced, because every keystroke here is a REBUILD of the whole piece
+    // (the characters are handed out while the strands are built). "change" alone
+    // would only fire on blur, which reads as the field being broken.
+    let timer = null;
+    input.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => sendTune(c, input.value), 420);
+    });
+    input.addEventListener("change", () => {
+      clearTimeout(timer);
+      sendTune(c, input.value);
+    });
+    row.append(input);
+    return row;
+  }
+
+  if (c.kind === "choice") {
+    const line = document.createElement("label");
+    line.className = "tune-row tune-inline";
+    if (c.hint) line.title = c.hint;
+    const select = document.createElement("select");
+    for (const opt of c.options || []) {
+      const o = document.createElement("option");
+      o.value = o.textContent = opt;
+      if (opt === c.value) o.selected = true;
+      select.appendChild(o);
+    }
+    select.addEventListener("change", () => sendTune(c, select.value));
+    line.append(name, select);
+    return line;
+  }
+
+  // color and bool: the control sits on the same line as its name.
+  const line = document.createElement("label");
+  line.className = "tune-row tune-inline";
+  if (c.hint) line.title = c.hint;
+  const input = document.createElement("input");
+  if (c.kind === "color") {
+    input.type = "color";
+    input.value = c.value;
+    input.addEventListener("input", () => sendTune(c, input.value));
+  } else {
+    input.type = "checkbox";
+    input.checked = !!c.value;
+    input.addEventListener("change", () => sendTune(c, input.checked));
+  }
+  line.append(name, input);
+  return line;
+}
+
+function renderTune() {
+  const spec = tuneSpecs[index];
+  // A piece re-announces after a preset change (see shared/js/tune.js), which lands
+  // here as a full rebuild of the rows. Without this the panel jumps back to the top
+  // under the hand of whoever just used a control near the bottom.
+  const scroll = elPanel.scrollTop;
+  elPieceName.textContent = PIECES[index]?.name ?? "";
+  elTuneBody.textContent = "";
+
+  if (!spec) {
+    const p = document.createElement("p");
+    p.textContent = "This piece is still building its controls.";
+    elTuneBody.appendChild(p);
+    return;
+  }
+
+  let section = null;
+  for (const c of spec) {
+    if (!section || section.dataset.group !== c.group) {
+      section = document.createElement("section");
+      section.className = "tune-group";
+      section.dataset.group = c.group;
+      const h = document.createElement("h3");
+      h.textContent = c.group;
+      section.appendChild(h);
+      if (GROUP_NOTES[c.group]) {
+        const note = document.createElement("p");
+        note.className = "tune-note";
+        note.textContent = GROUP_NOTES[c.group];
+        section.appendChild(note);
+      }
+      elTuneBody.appendChild(section);
+    }
+    section.appendChild(tuneRow(c));
+  }
+  elPanel.scrollTop = scroll;
+}
+
+function setPanel(open) {
+  panelOpen = open;
+  elPanel.classList.toggle("open", open);
+  elPlay.setAttribute("aria-expanded", String(open));
+  elPlay.querySelector(".pword").textContent = open ? "close" : "play";
+  if (open) renderTune();
+}
+
+elPlay.addEventListener("click", () => { setPanel(!panelOpen); hideHint(); });
+document.getElementById("reset").addEventListener("click", () => {
+  const f = frames[index];
+  // The piece restores its own authored values and RE-ANNOUNCES the spec, which
+  // is what redraws the inputs. The panel never guesses what "original" means.
+  if (f) post(f, "curtain:tune-reset");
+});
+
 function show(i, { push = true } = {}) {
   if (i === index) return;
   index = ((i % PIECES.length) + PIECES.length) % PIECES.length;
@@ -258,19 +627,39 @@ function show(i, { push = true } = {}) {
   }
   if (push) history.replaceState(null, "", "#" + p.slug);
   document.title = `${p.name} — curtain`;
+  // An open panel follows the piece: different piece, different forces.
+  if (panelOpen) renderTune();
 }
 
 window.addEventListener("message", (e) => {
-  if (e.data?.type !== "curtain:ready") return;
+  const type = e.data?.type;
+  if (type !== "curtain:ready" && type !== "curtain:tune") return;
   const i = frames.findIndex((f) => f && f.contentWindow === e.source);
-  if (i >= 0) markReady(i);
+  if (i < 0) return;
+  if (type === "curtain:ready") return markReady(i);
+  // A piece offering (or re-offering, after a reset) its controls.
+  tuneSpecs[i] = Array.isArray(e.data.spec) ? e.data.spec : null;
+  if (i === index && panelOpen) renderTune();
 });
 
 const go = (delta) => show(index + delta);
 
+// Installed on the shell AND inside each piece (see ensureFrame), so it fires
+// wherever the focus happens to be.
+const isTypingTarget = (el) =>
+  !!el &&
+  (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+
 function onKey(e) {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
-  if (e.key === "ArrowRight") { go(1); hideHint(); }
+  // Before the typing guard: a slider or a text field is exactly where you want
+  // Escape to still close the panel.
+  if (e.key === "Escape" && panelOpen) { setPanel(false); e.preventDefault(); return; }
+  // A focused range input answers the arrow keys itself, and a text field owns
+  // every key it gets. Paging the scene out from under either one is a bug.
+  if (isTypingTarget(e.target)) return;
+  if (e.key === "p" || e.key === "P") { setPanel(!panelOpen); hideHint(); }
+  else if (e.key === "ArrowRight") { go(1); hideHint(); }
   else if (e.key === "ArrowLeft") { go(-1); hideHint(); }
   else if (e.key >= "1" && e.key <= String(PIECES.length)) { show(Number(e.key) - 1); hideHint(); }
   else return;

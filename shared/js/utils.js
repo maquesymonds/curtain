@@ -24,3 +24,25 @@ export function sampleProfile(profile, t) {
   const b = profile[Math.min(i + 1, profile.length - 1)];
   return lerp(a, b, f);
 }
+
+// ---------------------------------------------------------------------------
+//  CONFIG PATHS
+//
+//  Dotted, with numeric segments for arrays: "gravity", "depth.haze.1",
+//  "lengthRange.0", "maneShape.whorl.strength". Arrays are addressed by index on
+//  purpose — it is how a [min, max] pair becomes two sliders without inventing a
+//  parallel config shape for a panel's benefit.
+//
+//  Shared by the two things that write into CONFIG from outside: the authoring
+//  panel (controls.js) and the visitor's knobs (tune.js).
+// ---------------------------------------------------------------------------
+export function getPath(obj, path) {
+  return path.split(".").reduce((o, k) => (o == null ? o : o[k]), obj);
+}
+
+export function setPath(obj, path, value) {
+  const keys = path.split(".");
+  const last = keys.pop();
+  const target = keys.reduce((o, k) => o[k], obj);
+  target[last] = value;
+}

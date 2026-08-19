@@ -18,7 +18,7 @@ import { CONFIG } from "./config.js";
 import { computeCover } from "../../shared/js/cover.js";
 import { HairSystem } from "../../shared/js/hairSystem.js";
 import { attachPointer, decayPointer } from "../../shared/js/pointer.js";
-import { notifyPointerHit } from "../../shared/js/interactionSound.js";
+import { notifyContact, configureSound } from "../../shared/js/interactionSound.js";
 import { BodyTrack, boomerangTime, boomerangHalf } from "./bodyTrack.js";
 import { BodyCollider } from "./bodyCollider.js";
 import { buildFinRoots, updateFinRoots, assignSwellPhases, FINS } from "./fins.js";
@@ -28,6 +28,22 @@ import { FinAnchorEditor } from "./finAnchorEditor.js";
 import { TrackCorrectionStore, poseAt as correctedPoseAt } from "./trackCorrectionStore.js";
 import { TrackCorrectionEditor } from "./trackCorrectionEditor.js";
 import { stageReady, onStage } from "../../shared/js/stage.js";
+import { ensureGlyphFont } from "../../shared/js/fonts.js";
+import { offerTuning } from "../../shared/js/tune.js";
+import { TUNE_SPEC } from "./tune.js";
+
+// Lower than the horse's despite a similar particle count (431), because the
+// fins are sparse and discrete where the mane is a continuous band: measured, a
+// brisk brush reads p50 only 5.7 but p99 32, a 5.6x spread, since most frames
+// catch a fin's edge and only a few catch it square. So a fin's sound is meant to
+// be quiet in between and loud when you actually hook one.
+//
+// Unlike the horse's and the willow's, this number barely matters. Sweeping it
+// over 24 / 16 / 12 / 9 and metering the piece's own output gave -24.7, -24.1,
+// -25.4 and -25.9 dB — under 2 dB across the whole range, and not monotonic,
+// which is measurement noise on a moving subject rather than a trend. 16 is the
+// midpoint of that flat region and sits near the p90 a real catch produces.
+configureSound({ weightFull: 16 });
 
 const IDENTITY = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
 const BUILD = "2026-08-11 · fish, code fins driven by swell";
@@ -264,6 +280,22 @@ function drawDiagnostics() {
 //   atlas    re-bake the glyph bitmaps (~6ms), strands and physics untouched
 //   rebuild  rebuild every fin from the tracked pose, then settle briefly
 // ---------------------------------------------------------------------------
+// Both panels that write into CONFIG from outside land here: the authoring one
+// (?controls, shared/js/controls.js) and the visitor's dozen knobs in the shell
+// (shared/js/tune.js). Same three cost words, so one handler serves both.
+//
+// A rebuild subsumes an atlas re-bake — hair.build() bakes on its way through —
+// which is why these are `else if` and not two ifs.
+function applyParamChange(kinds) {
+  if (kinds.has("rebuild")) controlsRebuild = true;
+  else if (kinds.has("atlas")) {
+    hair?.rebakeAtlas(dpr);
+    // Nothing repaints while the clip is paused (loop() returns early), so a
+    // change made against a still frame would look like it did nothing.
+    if (paused) render();
+  }
+}
+
 function startControls() {
   Promise.all([import("./controls.js"), import("../../shared/js/controls.js")])
     .then(([{ CONTROL_SPEC }, { initControls }]) =>
@@ -271,10 +303,7 @@ function startControls() {
         CONFIG,
         name: "pez",
         spec: CONTROL_SPEC,
-        onApply: (kinds) => {
-          if (kinds.has("rebuild")) controlsRebuild = true;
-          else if (kinds.has("atlas")) hair?.rebakeAtlas(dpr);
-        },
+        onApply: applyParamChange,
       })
     )
     .then((api) => {
@@ -293,6 +322,9 @@ function loop(now) {
     controlsRebuild = false;
     rebuild();
     settle(CONFIG.controlsSettleSteps);
+    // Same reason as in applyParamChange: past the check below nothing draws
+    // while the clip is paused, so the new fins would not appear until it plays.
+    if (paused || stageHidden) render();
   }
   // Parked by the shell while another piece is on screen — see the longer note on
   // the same check in willow/js/main.js. Pausing the clip is not enough by
@@ -334,7 +366,7 @@ function loop(now) {
       collider.setPose(pose, cover);
       updateFinRoots(hair, pose, buildPose, cover, finAnchorFrameStore, track.frameAt(loopTime));
       hair.update(dt, loopTime, dampingBoost);
-      notifyPointerHit(hair.pointerHit);
+      notifyContact(hair.contact);
     }
     decayPointer(CONFIG.pointer.decay);
     render();
@@ -422,6 +454,10 @@ async function init() {
   trackCorrectionStore = new TrackCorrectionStore();
   console.info(`Track corrections: ${await trackCorrectionStore.init()}`);
 
+  // Before the first build, never after: the atlas bakes whichever face is loaded
+  // at that moment and canvas never admits it fell back. See shared/js/fonts.js.
+  console.info(`Font: ${await ensureGlyphFont(CONFIG.fontFamily, CONFIG.fontWeight)}`);
+
   rebuild();
   settle(CONFIG.reduceMotionSettleSteps);
   // Paint HERE, not in the loop's first frame. Inside the shell the piece is
@@ -487,6 +523,10 @@ async function init() {
   };
 
   attachPointer();
+  // The visitor's knobs: a plain message channel, no dependency, drawn by the
+  // shell. Announced only now, with `hair` already built, so the first thing the
+  // panel can ask for is something the piece can actually apply.
+  offerTuning({ CONFIG, spec: TUNE_SPEC, onApply: applyParamChange });
   // Last, and only behind the flag: for a visitor the 2.6MB studio bundle is not even
   // a request.
   if (controlsWanted) startControls();

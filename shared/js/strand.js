@@ -152,8 +152,26 @@ export class Strand {
       // Ends fray instead of stopping on a clean line: past `frayFrom` a growing
       // share of characters is dropped, so the last few are scattered and the
       // very tip is often a single isolated glyph.
-      let char = text[(textCursor + i) % text.length];
-      if (t > CONFIG.frayFrom) {
+      // WHERE THE WORD STARTS. With CONFIG.textFromRoot every strand reads from the
+      // first character of the text, so a one-word text comes out legible down every
+      // strand. Two things get in the way of that and both are handled here.
+      //
+      // 1. hideRootGlyph draws nothing on the pinned root particle (for good reason —
+      //    see the note below), which would eat the word's FIRST LETTER: the fish's
+      //    fins read "ILAMENTO". So the read is shifted by one, and the word starts on
+      //    the first character that is actually drawn.
+      const fromRoot = CONFIG.textFromRoot && !CONFIG.charPool;
+      const rootShift = fromRoot && CONFIG.hideRootGlyph ? 1 : 0;
+      let char = text[(textCursor + i - rootShift + text.length) % text.length];
+      // 2. Fraying scatters the end of a strand, and on a SHORT strand it begins
+      //    inside the first repetition: measured on the mane, 11 of 84 strands lost a
+      //    letter that way and read "FILAMENT  F". So the first pass of the text is
+      //    exempt, and everything past it frays as before. What this cannot fix is a
+      //    strand with fewer particles than the word has letters — 2 of the 84 have 8,
+      //    so they read "FILAMENT" and stop. Raising minParticles would lengthen the
+      //    shortest locks at the edge of the crest, which costs more than it buys.
+      const wordGuard = fromRoot ? text.length + rootShift : 0;
+      if (t > CONFIG.frayFrom && i >= wordGuard) {
         const frayT = (t - CONFIG.frayFrom) / (1 - CONFIG.frayFrom);
         if (hash(seed + 29) < frayT * CONFIG.frayAmount) char = " ";
       }

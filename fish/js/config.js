@@ -191,9 +191,28 @@ export const CONFIG = configure({
   // reads as a drawn filament. The reference works the same way: small characters,
   // long elegant lines. Not microscopic — 11px is still legible as type.
   fontSize: 11,
-  // Back near the measured 8 via ?controls (was 6.9 for one session, tighter
-  // than the pairing above; now close to it again).
-  segmentLength: 8.95,
+  // Chakra Petch, self-hosted in shared/fonts (see shared/css/fonts.css). The
+  // monospace stack stays behind it as the fallback, which is the look this piece
+  // had before — so a font that fails to load degrades to the old piece, not to
+  // whatever the system serif happens to be.
+  // The CJK families are for the play panel's Chinese option: Chakra Petch has no
+  // CJK coverage, so without naming them the atlas bakes whatever the system
+  // happens to pick.
+  fontFamily:
+    '"Chakra Petch", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", ' +
+    'ui-monospace, "SF Mono", Menlo, monospace',
+  // 7.15, down from 8.95, BECAUSE THE TYPEFACE CHANGED (2026-08-19). Measured at
+  // fontSize 11 over this exact charPool: the old monospace stack set every one of
+  // the 67 characters at 6.62px, while Chakra Petch is proportional — mean 5.28,
+  // median 5.84, and a p10 of 2.60 because the pool is mostly punctuation, which is
+  // where a proportional face is narrowest (| . , : ; ! 1 i l). At the old 8.95 step
+  // that turned a ray from a continuous line into a string of beads — exactly the
+  // "confetti" failure the note above describes, arriving from the other direction.
+  // 8.95 * (5.28 / 6.62) = 7.19, rounded to 7.15: it restores the old ink-to-gap
+  // ratio for the AVERAGE character instead of for a width that no longer exists.
+  // Costs 3053 -> 3825 particles (+25%); the longest ray goes 53 -> 66, still far
+  // under maxParticles 170, so no fin is clipped shorter by the change.
+  segmentLength: 7.15,
   minParticles: 10,
   maxParticles: 170, // the caudal runs ~1.45x the half-length at 8px a character
   lengthProfile: [1], // ignored; every root carries an absolute lengthPx

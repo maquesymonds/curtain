@@ -96,6 +96,30 @@ configure({
   // deliberately kept ABOVE 16 for that reason. Worth checking against the
   // reference before keeping this.
   fontSize: 12.75,
+  // Chakra Petch, self-hosted in shared/fonts (see shared/css/fonts.css). The
+  // monospace stack stays behind it as the fallback, which is the look this piece
+  // had before — so a font that fails to load degrades to the old piece, not to
+  // whatever the system serif happens to be.
+  //
+  // The CJK families in the middle are not decoration: the play panel can switch
+  // this curtain to Chinese characters, and Chakra Petch has no CJK coverage at
+  // all, so without them the atlas would bake whatever the system picked by
+  // accident — a different face on every machine.
+  fontFamily:
+    '"Chakra Petch", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", ' +
+    'ui-monospace, "SF Mono", Menlo, monospace',
+
+  // ----- WHAT IT SAYS ------------------------------------------------------
+  // One word, and every strand starts at its first letter (textFromRoot), so the
+  // mane READS: FILAMENTO down the neck, over and over, once per strand. The old
+  // list of eight words joined into one long string and each strand took a slice
+  // from wherever the previous one stopped, which is why it never said anything —
+  // a strand would start mid-word on "AMENTO MEMORY MOT".
+  //
+  // frayFrom is 0.7 here, so the first repetition of the word lands inside the
+  // clean stretch and only the ones past that scatter.
+  words: ["FILAMENTO"],
+  textFromRoot: true,
   fontWeight: 100, // via ?controls — was the shared default 300 (not overridden before)
   glowIntensity: 1.45, // tight halo on the body pass, under the wide bloom
   glyphBloom: {
@@ -262,6 +286,24 @@ configure({
     // length profile has already taken the strands down to a third.
     rootURange: [0.055, 1.0],
 
+    // ----- KEEP THE FORELOCK'S DENSITY IN SCREEN SPACE ------------------------
+    // The band in front of the parting is spaced by u and counted at build time, so when the
+    // head turns to camera and that stretch of crest projects onto a third of its width, the
+    // same strands are drawn into a third of the area. See the measured collapse in
+    // thinForelock() in main.js: 120px of projected arc down to 46px, root density from 21 to
+    // 51.6 per 100px, and 54% of the band's glyphs over the sky at the bottom of it.
+    //
+    // `refArcPx` is the width at which nothing is thinned. 100 because the profile poses
+    // measure 99-112px, so `keep` saturates at 1 through all of them and this only bites when
+    // the band genuinely collapses — the alternative, taking the clip's maximum (120), would
+    // quietly drop two strands at every pose to no purpose.
+    // `feather` is how wide the fade-out crossover is in units of `keep`. A hard cut on a
+    // turning head reads as flicker; 0.15 is about 3-4 strands mid-fade at any moment.
+    // `curve` shapes the fall-off — see thinForelock(). At 1 it is a plain ratio, which
+    // cannot thin the collapse without also thinning the profile; at 2 the profile poses keep
+    // all 24 strands and the collapse drops to 8 (frame 72) and 5 (frame 67).
+    forelockThin: { enabled: true, refArcPx: 100, curve: 2, feather: 0.15 },
+
     // ----- THE FORELOCK, AND THE PARTING IT IMPLIES -------------------------
     // A mane has a parting. Behind it the hair sweeps back along the neck; in front of
     // it, between the ears, the forelock breaks FORWARD and falls over the forehead.
@@ -335,6 +377,43 @@ configure({
       // travels forward at roughly 30 degrees off vertical, in whatever direction the head
       // is facing at that moment rather than always toward screen +x.
       pull: 0.09,
+      // WHERE THE AIM STOPS BEING TRUSTED, in units of the aim's own vertical component
+      // (1 = straight down the forehead, 0 = horizontal, negative = upward). Below the near
+      // end the pull points straight down; above the far end it is the crest tangent
+      // untouched; between, a blend. See the measurement in aimForelock(): dy runs
+      // 0.33..0.84 through the profile poses where the forelock reads correctly, and
+      // collapses to 0.011 at frame 62 and -0.135 through frames 68-81, where the head is
+      // turned to camera and the same pull marched the tuft out past the ear.
+      // [0.10, 0.40] is where those two populations separate with room to spare: the worst
+      // good frame (48) sits at 0.331 and still keeps 77% of its crest aim, while the whole
+      // broken window falls below 0.10 and aims straight down.
+      //
+      // Measured, strands lying more than 65 degrees off vertical, per frame:
+      //                        frames 58-101      frames 1-56      frames 102-120
+      //     before             peak 18, mean 6.5  peak 1, mean 0.2  peak 0
+      //     aimDown [.1,.4]    peak 10, mean 1.4  peak 1, mean 0.2  peak 0
+      // The mean falls to a fifth and the profile poses do not move — the whole cost lands
+      // where the aim was wrong. Frame by frame the tail is what changes: 75|18 77|18 79|14
+      // 81|14 83|11 85|8 becomes 76|2 77|1 79|0 81|0 84|0 85|0. What survives is frames
+      // 66-72 (peak 10), and that is NOT this parameter: the blend is already fully on by
+      // frame 60, so those strands are carrying a launch angle and a resting arc baked at
+      // build time, exactly the "born in the wrong place" limit described above. Closing it
+      // needs a per-frame launch direction, which needs a rebuild, which costs 6.7ms and
+      // throws every tip back to its resting pose — measured, 103.7px of median jump.
+      aimDown: [0.1, 0.4],
+      // The same weight on the forelock's LATERAL DRAPE: what fraction of it survives when
+      // the aim is fully distrusted. 1 = inert, the drape is left alone, and that is the
+      // default because the sweep says it earns almost nothing. Measured over frames 58-101,
+      // horizontal strands (>65 deg off vertical), peak and mean per frame:
+      //     floor 1.00  (inert)   peak 11   mean 1.5
+      //     floor 0.35            peak 11   mean 1.7   <- no better than inert
+      //     floor 0.00            peak  9   mean 0.8
+      // Only taking it to zero does anything, and that removes the lateral bias entirely at
+      // those poses — `drape` also feeds the resting arc that opens the tuft away from the
+      // crest, so a strand without it reads as a vertical line of set type rather than as
+      // hair. That is a look judgement, not a number, so it is left on a slider at its inert
+      // value instead of being chosen here. The measured win is `aimDown` above, not this.
+      aimDownDrapeFloor: 1,
       // Multiplier on CONFIG.drapeLean for these strands. Negative leans the resting
       // pose forward instead of back. Measured on the resting pose alone, this is what
       // took the tip from -31px (backwards, the global lean winning) to +30..+66px
