@@ -40,6 +40,26 @@ export function stageReady() {
   }
 }
 
+// El cartel "click for sound" del shell tiene que irse EN el clic, no medio
+// segundo después. Pero la pieza ocupa el viewport entero, así que el primer
+// clic cae dentro de ESTE documento y el shell no ve el evento — el mismo
+// problema que el lecho de sonido, con la nota larga en shared/js/ambient.js,
+// que allí se resuelve sondeando cada 500 ms. Aquí no hace falta sondear: este
+// documento sí ve el gesto, y lo único que tiene que hacer es contarlo. Una vez
+// y se desengancha; lo que pase después ya no le importa a nadie.
+if (inShell) {
+  const PRESS = ["pointerdown", "mousedown", "touchstart", "keydown", "wheel"];
+  const tell = () => {
+    for (const type of PRESS) window.removeEventListener(type, tell, true);
+    try {
+      window.parent.postMessage({ type: "curtain:press" }, "*");
+    } catch {}
+  };
+  for (const type of PRESS) {
+    window.addEventListener(type, tell, { passive: true, capture: true });
+  }
+}
+
 export function onStage({ onShow, onHide } = {}) {
   if (!inShell) return;
   window.addEventListener("message", (e) => {

@@ -754,6 +754,9 @@ function show(i, { push = true } = {}) {
 
 window.addEventListener("message", (e) => {
   const type = e.data?.type;
+  // El primer gesto dentro de una pieza (shared/js/stage.js). No hace falta
+  // saber de qué pieza vino: el cartel es uno solo.
+  if (type === "curtain:press") return hideHint();
   if (type !== "curtain:ready" && type !== "curtain:tune") return;
   const i = frames.findIndex((f) => f && f.contentWindow === e.source);
   if (i < 0) return;
@@ -789,10 +792,8 @@ function onKey(e) {
   e.preventDefault();
 }
 
-let hintTimer = null;
 function hideHint() {
   elHint.classList.add("gone");
-  clearTimeout(hintTimer);
 }
 
 PIECES.forEach((p, i) => {
@@ -844,38 +845,22 @@ window.addEventListener("hashchange", () => {
 // a click, a key or a touch does (the long note in shared/js/interactionSound.js
 // has the measurements). So a visitor who lands here and only hovers the curtain
 // gets silence, with nothing to tell them why, and it reads as broken rather
-// than as waiting.
-//
-// Which is why the hint does not simply fade on a timer here: the timer runs, and
-// if the audio still has not been allowed to start, what is left on screen is the
-// one line that matters until it does. Everything else goes.
-function audioRunning() {
-  // The bed lives in this document, so its state is readable directly and is the
-  // signal that matters: one press starts both it and the curtain, and this one
-  // cannot be blocked by an iframe that is still booting.
-  try {
-    if (window.__ambientRunning && window.__ambientRunning()) return true;
-  } catch {}
-  const f = document.querySelector("iframe.active");
-  try {
-    return f.contentWindow.maneStats.report().ctx === "running";
-  } catch {
-    return false; // iframe still booting, or no diagnostics on that build
-  }
+// than as waiting. De ahí el cartel, y de ahí que no se vaya con un temporizador:
+// se va con el gesto que resuelve lo que el cartel pide.
+
+// El cartel se va con el gesto, no con el reloj. Antes esperaba a oír que el
+// audio ya sonaba, y eso llegaba tarde por construcción: la pieza tapa el
+// viewport, así que el clic cae en el iframe y el shell se enteraba por el
+// sondeo de shared/js/ambient.js — hasta 500 ms de retraso más 400 del suyo.
+// Ahora la pieza avisa ("curtain:press", arriba) y aquí solo se escucha lo que
+// caiga en el propio shell.
+for (const type of ["pointerdown", "keydown", "touchstart", "wheel"]) {
+  window.addEventListener(type, hideHint, { passive: true, capture: true });
 }
 
 // Deep link: /#willow opens on the willow.
 const start = PIECES.findIndex((p) => p.slug === location.hash.slice(1));
 show(start >= 0 ? start : 0);
-hintTimer = setTimeout(() => {
-  if (audioRunning()) return hideHint();
-  elHint.textContent = "click for sound";
-  const poll = setInterval(() => {
-    if (!audioRunning()) return;
-    clearInterval(poll);
-    hideHint();
-  }, 400);
-}, 6000);
 </script>
 
 <!-- The bed that runs under everything, for as long as the page is open. It is
