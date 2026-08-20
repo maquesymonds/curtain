@@ -532,6 +532,18 @@ function buildGraph() {
   return { master, limiter, grainBus, grainFilter, bedGain, bedFilter, bedSrc, dL, dR, fb, dlyFilter, dlySend, meter, meterBuf: new Float32Array(meter.fftSize) };
 }
 
+let lastResumeAt = -Infinity;
+function tryResume() {
+  if (!ctx || ctx.state !== "suspended") return;
+  // resume() on a document with no activation rejects, and calling it every
+  // frame would be a rejected promise 60 times a second for as long as someone
+  // hovers without ever pressing anything.
+  const t = performance.now();
+  if (t - lastResumeAt < 400) return;
+  lastResumeAt = t;
+  ctx.resume().catch(() => {});
+}
+
 function ensureContext() {
   if (ctx) return;
   const AC = window.AudioContext || window.webkitAudioContext;
@@ -553,18 +565,51 @@ function ensureContext() {
   });
 }
 
-// Chrome grants an AudioContext only on a real activation — a pointerdown, a
-// key, a touch. A pointermove does not count, which is exactly the gesture this
-// instrument is played with, so the context has to be armed separately from
-// being used. Also armed from the PARENT document: the pieces run in iframes in
-// the root index.html, sticky activation is per-document, and the arrow keys
-// that switch pieces land on the parent.
+// ---------------------------------------------------------------------------
+//  ACTIVATION
+//
+//  A browser will not let an AudioContext run until the document has had a real
+//  user activation, and MOVING THE POINTER IS NOT ONE. Only a press counts —
+//  pointerdown, a key, a touch. That is a rule with no way around it, and it has
+//  a consequence worth stating plainly, because it looks exactly like a bug:
+//
+//      On a freshly loaded page, hovering the curtain makes no sound at all,
+//      however long you hover. The first press of anything — a click, an arrow
+//      key — switches it on, and it works for the rest of the visit.
+//
+//  Measured, on /horse/ with the browser's real policy in force: hover only ->
+//  ctx suspended, 0 grains, while contact was being detected on 29 of 38 frames.
+//  One keypress -> ctx running, 18 grains, -22.3 dB. One click -> the same.
+//  So the instrument was loaded and willing the whole time; it was not allowed
+//  to sound. That is why it "starts working after a while" — the while is however
+//  long it takes the visitor to press something.
+//
+//  What this function can do is make sure the FIRST press, whatever it is and
+//  wherever it lands, is the one that works. Hence the wide net, and hence the
+//  listeners on the PARENT document as well: the pieces run in iframes in the
+//  root index.html, and the arrow keys that switch pieces land on the parent.
+//  Verified in the shell — an arrow key pressed on the parent does bring the
+//  active iframe's context to running.
+// ---------------------------------------------------------------------------
 function armActivation() {
   const wake = () => {
     ensureContext();
     if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
   };
-  const evts = ["pointerdown", "keydown", "touchstart", "wheel"];
+  // Everything that counts as an activation, plus the redundant aliases, because
+  // a missed first press costs the visitor the whole first impression. `wheel`
+  // is in here knowing it does NOT count in Chrome: it is free, and it does
+  // count in some others.
+  const evts = [
+    "pointerdown",
+    "pointerup",
+    "mousedown",
+    "click",
+    "keydown",
+    "touchstart",
+    "touchend",
+    "wheel",
+  ];
   for (const e of evts) window.addEventListener(e, wake, { passive: true, capture: true });
   try {
     if (window.parent && window.parent !== window && window.parent.document) {
@@ -586,6 +631,14 @@ function armActivation() {
   });
 }
 armActivation();
+
+// Built NOW, at module load, not on the first press. Creating a context before
+// activation is allowed — it simply starts suspended — and doing it here means
+// the 508 KB sheet is fetched, decoded and wired into a graph while the piece is
+// still booting. So the first press only has to call resume(), and the sound is
+// there on the same gesture instead of a decode later. Deferring this was costing
+// the first touch after the first click.
+ensureContext();
 
 // ---------------------------------------------------------------------------
 //  VOICES
@@ -822,8 +875,12 @@ export function notifyContact(contact) {
   // the case where activation happened before this module had a context.
   if (hit && !wasHit) {
     ensureContext();
-    if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
+    tryResume();
   }
+  // And keep trying while a touch continues, throttled. The rising edge alone
+  // misses the case where the activation happened during a hover that was
+  // already in progress — the press is over by the time contact next breaks.
+  else if (hit && ctx && ctx.state === "suspended") tryResume();
   wasHit = hit;
   record(contact); // before the bail-out: calibration must work in a headless
   // browser, which has no audio device and never reaches "running"

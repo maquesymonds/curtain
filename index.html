@@ -73,7 +73,13 @@
   .dot[aria-current="true"] { background: #fff; transform: scale(1.25); }
 
   #hint {
-    right: 26px; bottom: 24px; opacity: 0.88;
+    /* Arriba y al centro. Es la única línea de la pantalla que puede quedarse
+       indefinidamente — hasta que el audio arranque —, y abajo a la derecha se
+       leía como pie de página de otra cosa. Entre el wordmark y los botones no
+       hay nada, así que ahí no tapa nada. */
+    top: 24px; left: 50%; transform: translateX(-50%);
+    text-align: center; max-width: min(64vw, 460px);
+    opacity: 0.88;
     pointer-events: none; text-shadow: 0 0 10px rgba(0,0,0,0.95);
     transition: opacity 600ms ease;
   }
@@ -94,10 +100,35 @@
   /* No underline on hover either: the wordmark is set once and does not need to
      perform being a link. The pointer and the tab focus ring are enough. */
   #mark:hover, #mark:focus-visible { outline: none; }
-  #mark em { font-style: normal; font-size: 19px; letter-spacing: 0; opacity: 0.75; }
+  /* La flecha es un trazo dibujado, no el glifo ↗ de la fuente: el glifo venía
+     con el grosor y la punta que decidiera la tipografía, y a 19px se leía como
+     un acento. Un SVG de una sola línea con punta, del mismo grosor que el
+     hairline de la palabra. Medido sobre el render: la tinta del glifo viejo a
+     19px daba 11x11 px; el SVG a 34px, ya girado -45°, da 17x17 — un 55% más
+     de trazo visible. Ojo: al girar 45° el largo se proyecta dividido por √2,
+     así que la caja del em tiene que ser bastante mayor que la tinta que se ve. */
+  #mark em {
+    display: inline-block; width: 34px; height: 34px;
+    /* La caja del em es mayor que la tinta, así que el gap de 8px del flex se
+       leía como 21px de aire. -5px lo devuelve a los 16px de antes. */
+    margin-left: -5px;
+    align-self: center; opacity: 0.85;
+    /* En reposo apunta arriba a la derecha (salir del sitio); al pasar por
+       encima se endereza a la horizontal. Se dibuja horizontal y se gira, así
+       la punta nunca se deforma. */
+    transform: rotate(-45deg);
+    transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease;
+  }
+  #mark em svg { width: 100%; height: 100%; display: block; }
+  #mark:hover em, #mark:focus-visible em { transform: rotate(0deg); opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { #mark em { transition: none; } }
   /* ----- the play button, and the panel it opens ----- */
+  /* Los dos botones de arriba a la derecha comparten fila. Van en un contenedor
+     y no clavados en píxeles porque #play cambia de ancho al abrirse ("play" pasa
+     a "close"), y el del sonido tendría que perseguirlo. */
+  #topright { top: 20px; right: 22px; display: flex; align-items: center; gap: 9px; }
+
   #play {
-    top: 20px; right: 22px;
     display: inline-flex; align-items: center; gap: 9px;
     padding: 8px 15px; border-radius: 999px; cursor: pointer;
     border: 1px solid rgba(255,255,255,0.22);
@@ -113,6 +144,27 @@
   #play svg { width: 10px; height: 10px; display: block; }
   #play .close { display: none; }
   #play[aria-expanded="true"] .close { display: block; }
+
+  /* El interruptor de sonido: redondo, del mismo material que #play, sin palabra.
+     Es lo primero que alguien busca apagar, así que no puede vivir dentro de un
+     panel que hay que abrir. */
+  #sound {
+    flex: 0 0 auto; width: 34px; height: 34px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 999px; cursor: pointer;
+    border: 1px solid rgba(255,255,255,0.22);
+    background: rgba(0,0,0,0.32);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    color: #fff;
+    opacity: 0.92; transition: opacity 180ms ease, border-color 180ms ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #sound:hover, #sound:focus-visible { opacity: 1; border-color: rgba(255,255,255,0.6); outline: none; }
+  #sound svg { width: 15px; height: 15px; display: block; }
+  /* Apagado se lee sin hover: cambia el icono Y baja la intensidad. */
+  #sound[aria-pressed="false"] { opacity: 0.55; }
+  #sound[aria-pressed="false"] .on { display: none; }
+  #sound[aria-pressed="true"] .off { display: none; }
 
   #panel {
     top: 62px; right: 22px;
@@ -138,7 +190,6 @@
      a smaller x-height, so the same 11px read noticeably fainter. */
   #panel p { margin: 8px 0 0; font-size: 11.5px; line-height: 1.62; opacity: 0.94; }
   #panel .lede { opacity: 1; }
-  #piece-name { opacity: 0.9; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; }
 
   .tune-group { margin-top: 18px; border-top: 1px solid rgba(255,255,255,0.09); padding-top: 12px; }
   .tune-group h3 {
@@ -228,6 +279,7 @@
        triangle; with the triangle gone (it read as a transport control) hiding the
        word left an empty pill — nothing at all in the closed state. */
     #play { padding: 8px 13px; }
+    #sound { width: 32px; height: 32px; }
     #panel { top: 58px; left: 16px; right: 16px; width: auto; max-height: calc(100vh - 150px); }
   }
 </style>
@@ -249,10 +301,28 @@
 <header class="ui" id="brand">
   <a id="mark" href="https://www.instagram.com/filamento____/?hl=en"
      target="_blank" rel="noopener noreferrer"
-     title="filamento on Instagram"><span>filamento</span><em>&#8599;</em></a>
+     title="filamento on Instagram"><span>filamento</span><em aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15M13 6l6 6-6 6"/></svg></em></a>
 </header>
 
-<button class="ui" id="play" type="button" aria-expanded="false" aria-controls="panel"
+<div class="ui" id="topright">
+
+<button id="sound" type="button" aria-pressed="true"
+        title="Sound on and off (S) — the bed and the curtain, both.">
+  <svg class="on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M4 9.5h3.2L12 5.5v13L7.2 14.5H4z"/>
+    <path d="M16.2 8.8a4.6 4.6 0 0 1 0 6.4"/>
+    <path d="M18.9 6.3a8.4 8.4 0 0 1 0 11.4"/>
+  </svg>
+  <svg class="off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M4 9.5h3.2L12 5.5v13L7.2 14.5H4z"/>
+    <path d="M16.4 9.6l5.2 4.8M21.6 9.6l-5.2 4.8"/>
+  </svg>
+</button>
+
+<button id="play" type="button" aria-expanded="false" aria-controls="panel"
         title="Move the forces and colours of the piece (P)">
   <!-- No play triangle. It read as "press play on something" — a transport
        control for a clip, which is not what this opens. The word carries it. -->
@@ -261,17 +331,18 @@
   <span class="pword">play</span>
 </button>
 
+</div>
+
 <div class="ui" id="panel" role="dialog" aria-label="Play with the piece">
   <h2>Play</h2>
   <!-- The claim has to match what the panel actually hands over. It used to
        promise "move a number" while four force sliders were here; with those gone
        it says what is left: the light and the words. -->
   <p class="lede">
-    None of these letters is drawn. Each one hangs off a physics — weight, wind,
-    current, light — and the shape falls out of that. What you get to change here
-    is how it burns and what it says.
+    None of these letters is drawn. Each one hangs off a physics of weight, wind,
+    current and light, and the shape falls out of that. What you get to change
+    here is how it burns and what it says.
   </p>
-  <p>You are playing <span id="piece-name"></span></p>
   <div id="tune-body"></div>
   <div id="tune-foot">
     <button id="reset" type="button">back to the original</button>
@@ -283,17 +354,23 @@
   <span id="num"></span><span id="name"></span><span id="desc"></span>
 </div>
 <div class="ui" id="dots"></div>
-<div class="ui" id="hint">← → to change piece · P to play · D for diagnostics</div>
+<div class="ui" id="hint">click for sound</div>
 <div class="ui" id="loading">LOADING</div>
 
 <script>
 const PIECES = [
   { slug: "horse",  src: "horse/",  name: "Horse", desc: "a mane of letters" },
-  { slug: "fish",   src: "fish/",   name: "Fish",  desc: "code fins · water forces" },
-  // Oculto por ahora — para reactivarlo, descomentar y ubicarlo donde
-  // corresponda en el orden.
+  // Ocultos por ahora — para reactivar cualquiera, descomentar su línea y
+  // ubicarla donde corresponda en el orden. Nada más que hacer: el shell se
+  // adapta solo (ver el guard de una sola pieza más abajo).
+  // { slug: "fish",   src: "fish/",   name: "Fish",  desc: "code fins · water forces" },
   // { slug: "willow", src: "willow/", name: "Willow", desc: "vines hanging off the branches" },
 ];
+
+// Con una sola pieza no hay a dónde pasar: las flechas, los puntos y el número
+// del pager son controles muertos, y la pista mentiría. Se apagan aquí en vez
+// de tocarse a mano cada vez que se comenta o descomenta una pieza de arriba.
+const SOLO = PIECES.length < 2;
 
 const stage = document.getElementById("stage");
 const elNum = document.getElementById("num");
@@ -304,9 +381,9 @@ const elHint = document.getElementById("hint");
 const elLoading = document.getElementById("loading");
 
 const elPlay = document.getElementById("play");
+const elSound = document.getElementById("sound");
 const elPanel = document.getElementById("panel");
 const elTuneBody = document.getElementById("tune-body");
-const elPieceName = document.getElementById("piece-name");
 
 const frames = new Array(PIECES.length).fill(null);
 const ready = new Array(PIECES.length).fill(false); // has posted "curtain:ready"
@@ -451,8 +528,43 @@ let panelOpen = false;
 const GROUP_NOTES = {
   color: "Every letter is baked in three layers: halo, body, core.",
   type: "The type and its light. Changing the text rebuilds the whole piece.",
-  sound: "The curtain is an instrument. You play it by moving the cursor through it.",
+  // Sin nota para "sound": ese grupo ya no se dibuja aquí (ver isSoundCtl).
 };
+
+// EL SONIDO ES EL ÚNICO CONTROL QUE NO SE DIBUJA EN EL PANEL. Sigue siendo un
+// control de la pieza y viaja por el mismo protocolo (horse/js/tune.js, id
+// "sound/sound"); el shell solo lo saca de la lista y le da el botón redondo de
+// arriba, al lado de play. Razón: apagar el sonido es lo primero que alguien
+// quiere hacer, y no se le puede pedir que abra un panel para llegar ahí.
+const isSoundCtl = (c) => c.group === "sound";
+const soundCtl = () =>
+  (tuneSpecs[index] || []).find((c) => c.kind === "bool" && isSoundCtl(c)) || null;
+
+// ESTE BOTÓN ES UN MUTE MAESTRO, y de ahí que el estado viva AQUÍ y no en la
+// pieza. Suenan DOS cosas a la vez y solo una es de la pieza:
+//   - el lecho ambiente (shared/js/ambient.js) es de este documento — una copia
+//     por iframe serían tres cintas en tres puntos distintos, ver la nota larga
+//     junto al <script type="module"> del final;
+//   - el sonido de contacto (interactionSound.js) es de la pieza, y viaja por el
+//     protocolo de tune.
+// Mandarlo solo a la pieza era el bug: medido, "sound/sound" SÍ pasaba a false
+// dentro del iframe, y la música seguía sonando igual — así que desde fuera el
+// botón "no hacía nada". Nadie llamaba nunca a setAmbientEnabled.
+let soundOn = true;
+window.__soundOn = soundOn; // lo lee el módulo del ambiente, que carga después
+
+// Se llama al pulsar, al cambiar de pieza y cuando una pieza anuncia (o reanuncia,
+// tras un reset) sus controles. Empuja el estado del shell hacia los dos lados en
+// vez de leerlo de ninguno: así el mute sobrevive un cambio de escena y un "back
+// to the original", que es lo que espera quien apagó el sonido a propósito.
+function syncSound() {
+  window.__soundOn = soundOn;
+  window.__setAmbient?.(soundOn); // no existe hasta que ambient.js carga
+  const c = soundCtl();
+  if (c && !!c.value !== soundOn) sendTune(c, soundOn);
+  elSound.setAttribute("aria-pressed", String(soundOn));
+  elSound.setAttribute("aria-label", soundOn ? "Sound on" : "Sound off");
+}
 
 // Decimals enough for the step, so 0.005 reads as 0.145 and 2 reads as 114.
 const decimalsFor = (step) => {
@@ -564,7 +676,6 @@ function renderTune() {
   // here as a full rebuild of the rows. Without this the panel jumps back to the top
   // under the hand of whoever just used a control near the bottom.
   const scroll = elPanel.scrollTop;
-  elPieceName.textContent = PIECES[index]?.name ?? "";
   elTuneBody.textContent = "";
 
   if (!spec) {
@@ -576,6 +687,7 @@ function renderTune() {
 
   let section = null;
   for (const c of spec) {
+    if (isSoundCtl(c)) continue; // vive en la barra de arriba, no aquí
     if (!section || section.dataset.group !== c.group) {
       section = document.createElement("section");
       section.className = "tune-group";
@@ -605,6 +717,14 @@ function setPanel(open) {
 }
 
 elPlay.addEventListener("click", () => { setPanel(!panelOpen); hideHint(); });
+
+elSound.addEventListener("click", () => {
+  soundOn = !soundOn;
+  syncSound();
+  // Apagar el sonido a mano contesta la pregunta que hace "click for sound", así
+  // que la línea se va: dejarla puesta sería insistir con algo ya decidido.
+  hideHint();
+});
 document.getElementById("reset").addEventListener("click", () => {
   const f = frames[index];
   // The piece restores its own authored values and RE-ANNOUNCES the spec, which
@@ -625,6 +745,7 @@ function show(i, { push = true } = {}) {
   for (const d of elDots.children) {
     d.setAttribute("aria-current", String(Number(d.dataset.i) === index));
   }
+  syncSound(); // el botón sigue a la pieza que se está mirando
   if (push) history.replaceState(null, "", "#" + p.slug);
   document.title = `${p.name} — curtain`;
   // An open panel follows the piece: different piece, different forces.
@@ -639,6 +760,7 @@ window.addEventListener("message", (e) => {
   if (type === "curtain:ready") return markReady(i);
   // A piece offering (or re-offering, after a reset) its controls.
   tuneSpecs[i] = Array.isArray(e.data.spec) ? e.data.spec : null;
+  if (i === index) syncSound();
   if (i === index && panelOpen) renderTune();
 });
 
@@ -659,6 +781,7 @@ function onKey(e) {
   // every key it gets. Paging the scene out from under either one is a bug.
   if (isTypingTarget(e.target)) return;
   if (e.key === "p" || e.key === "P") { setPanel(!panelOpen); hideHint(); }
+  else if (e.key === "s" || e.key === "S") { elSound.click(); }
   else if (e.key === "ArrowRight") { go(1); hideHint(); }
   else if (e.key === "ArrowLeft") { go(-1); hideHint(); }
   else if (e.key >= "1" && e.key <= String(PIECES.length)) { show(Number(e.key) - 1); hideHint(); }
@@ -682,6 +805,19 @@ PIECES.forEach((p, i) => {
   elDots.appendChild(b);
 });
 
+if (SOLO) {
+  for (const id of ["prev", "next", "dots"]) document.getElementById(id).style.display = "none";
+  elNum.style.display = "none";
+  // El nombre de la pieza también se va: con una sola en pantalla, decir cuál es
+  // no informa de nada. Queda la línea de abajo sola, que es una leyenda de foto.
+  elName.style.display = "none";
+  // Y entonces tiene que sobrevivir al media query de 640px, que la esconde por
+  // no chocar con el nombre. Sin nombre no hay choque, y esconderla dejaría la
+  // esquina vacía en móvil.
+  elDesc.style.display = "inline";
+  // El cartel ya dice lo único que hay que decir; nada que recortar aquí.
+}
+
 document.getElementById("prev").addEventListener("click", () => { go(-1); hideHint(); });
 document.getElementById("next").addEventListener("click", () => { go(1); hideHint(); });
 window.addEventListener("keydown", onKey);
@@ -703,10 +839,59 @@ window.addEventListener("hashchange", () => {
   if (i >= 0) show(i, { push: false });
 });
 
+// A piece cannot make a sound until this page has had a real press. That is a
+// browser rule and not a choice — moving the pointer does not count as one, only
+// a click, a key or a touch does (the long note in shared/js/interactionSound.js
+// has the measurements). So a visitor who lands here and only hovers the curtain
+// gets silence, with nothing to tell them why, and it reads as broken rather
+// than as waiting.
+//
+// Which is why the hint does not simply fade on a timer here: the timer runs, and
+// if the audio still has not been allowed to start, what is left on screen is the
+// one line that matters until it does. Everything else goes.
+function audioRunning() {
+  // The bed lives in this document, so its state is readable directly and is the
+  // signal that matters: one press starts both it and the curtain, and this one
+  // cannot be blocked by an iframe that is still booting.
+  try {
+    if (window.__ambientRunning && window.__ambientRunning()) return true;
+  } catch {}
+  const f = document.querySelector("iframe.active");
+  try {
+    return f.contentWindow.maneStats.report().ctx === "running";
+  } catch {
+    return false; // iframe still booting, or no diagnostics on that build
+  }
+}
+
 // Deep link: /#willow opens on the willow.
 const start = PIECES.findIndex((p) => p.slug === location.hash.slice(1));
 show(start >= 0 ? start : 0);
-hintTimer = setTimeout(hideHint, 6000);
+hintTimer = setTimeout(() => {
+  if (audioRunning()) return hideHint();
+  elHint.textContent = "click for sound";
+  const poll = setInterval(() => {
+    if (!audioRunning()) return;
+    clearInterval(poll);
+    hideHint();
+  }, 400);
+}, 6000);
+</script>
+
+<!-- The bed that runs under everything, for as long as the page is open. It is
+     loaded here and not inside a piece on purpose: each piece is an iframe with
+     its own AudioContext, so a bed started in one would be a different bed per
+     piece, each at its own point in the recording, and every scene change would
+     jump the tape. The shell owns it — one instance, started once, untouched by
+     switching pieces. See the long note at the top of shared/js/ambient.js. -->
+<script type="module">
+  import { ambientRunning, setAmbientEnabled } from "./shared/js/ambient.js";
+  window.__ambientRunning = ambientRunning;
+  window.__setAmbient = setAmbientEnabled;
+  // Este módulo carga DESPUÉS del script de arriba, así que a estas alturas el
+  // botón ya puede estar en apagado. Se lee el estado, no se asume que es el
+  // de fábrica: si no, el lecho arrancaría por encima de un mute.
+  setAmbientEnabled(window.__soundOn !== false);
 </script>
 </body>
 </html>
